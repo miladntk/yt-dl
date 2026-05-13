@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: '🔗 لینک ویدیو (چند لینک با فاصله) یا از فایل urls.txt استفاده کنید'
-        required: false
+        description: '🔗 لینک ویدیو (لینک‌ها را با , یا فاصله یا + جدا کنید)'
+        required: true
         type: string
         default: ''
       download_subtitles:
@@ -31,15 +31,6 @@ on:
         required: false
         default: ''
         type: string
-      parallel_downloads:
-        description: '⚡ تعداد دانلود همزمان (پیشنهاد: 2)'
-        required: false
-        default: '2'
-        type: choice
-        options:
-          - '1'
-          - '2'
-          - '3'
 
 jobs:
   download-youtube:
@@ -52,20 +43,13 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: بررسی ورودی‌ها
-        run: |
-          HAS_INPUT="${{ github.event.inputs.video_urls != '' && github.event.inputs.video_urls != ' ' }}"
-          if [ "$HAS_INPUT" = "false" ]; then
-            echo "ℹ️ No URLs provided in input, will check for urls.txt file"
-          fi
-
       - name: دریافت کد مخزن
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: تنظیم Git برای فایل‌های حجیم
+      - name: تنظیم Git
         run: |
           git config --global http.postBuffer 524288000
           git config --global user.name "github-actions"
@@ -82,66 +66,49 @@ jobs:
             -p 1080:1080 \
             --cap-add NET_ADMIN \
             caomingjun/warp
-          
-          # انتظار برای آماده شدن WARP
-          for i in {1..30}; do
-            if curl -s --socks5 127.0.0.1:1080 --max-time 2 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q "warp=on"; then
-              echo "✅ WARP is ready!"
-              break
-            fi
-            echo "⏳ Waiting for WARP... ($i/30)"
-            sleep 2
-          done
+          sleep 15
 
       - name: نصب پیش‌نیازها
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            python3-pip ffmpeg zip p7zip-full \
-            curl jq bc parallel aria2
+          sudo apt-get install -y python3-pip ffmpeg zip p7zip-full curl jq bc aria2
           pip3 install --upgrade yt-dlp
-          
-          # نصب yt-dlp جداگانه برای اطمینان
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      - name: آماده‌سازی لینک‌ها
-        id: prepare_urls
+      - name: پردازش لینک‌ها
+        id: process_urls
         run: |
           INPUT_URLS="${{ github.event.inputs.video_urls }}"
           
-          # اولویت: ورودی دستی > فایل urls.txt
-          if [ -n "$INPUT_URLS" ] && [ "$INPUT_URLS" != " " ]; then
-            echo "$INPUT_URLS" | tr ' ' '\n' | grep -v '^$' > all_urls.txt
-            echo "✅ Using $INPUT_URLS from manual input"
-          elif [ -f "urls.txt" ] && [ -s "urls.txt" ]; then
-            cat urls.txt | grep -v '^#' | grep -v '^$' > all_urls.txt
-            echo "✅ Using urls.txt file"
-          else
-            echo "❌ No URLs provided!"
-            exit 1
-          fi
+          # جایگزینی جداکننده‌های مختلف با فاصله
+          # پشتیبانی از: , (کاما) و + و فاصله
+          CLEAN_URLS=$(echo "$INPUT_URLS" | sed 's/[,+]/ /g' | tr -s ' ')
+          
+          # تبدیل به آرایه و فیلتر لینک‌های خالی
+          echo "$CLEAN_URLS" | tr ' ' '\n' | grep -v '^$' > all_urls.txt
           
           TOTAL_URLS=$(wc -l < all_urls.txt)
           echo "total_urls=$TOTAL_URLS" >> $GITHUB_OUTPUT
-          echo "📊 Total URLs to download: $TOTAL_URLS"
           
-          # نمایش 5 لینک اول برای بررسی
-          echo "📋 First 5 URLs:"
-          head -5 all_urls.txt
+          echo "========================================="
+          echo "📊 تعداد ویدیوها: $TOTAL_URLS"
+          echo "========================================="
+          echo ""
+          echo "📋 لینک‌های وارد شده:"
+          cat all_urls.txt
+          echo ""
+          echo "========================================="
 
       - name: دانلود ویدیوها
         env:
           QUALITY: ${{ github.event.inputs.quality }}
           PASSWORD: ${{ github.event.inputs.password }}
-          PARALLEL: ${{ github.event.inputs.parallel_downloads }}
+          DOWNLOAD_SUBS: ${{ github.event.inputs.download_subtitles }}
         run: |
           REPO_OWNER="${{ github.repository_owner }}"
           REPO_NAME="${{ github.event.repository.name }}"
           BRANCH="${{ github.ref_name }}"
           QUALITY="${QUALITY:-best}"
           PASSWORD="${PASSWORD}"
-          PARALLEL="${PARALLEL:-2}"
           
           BACKUP_DIR="/tmp/video_backup_$$"
           mkdir -p "$BACKUP_DIR" videos
@@ -158,137 +125,119 @@ jobs:
             *) FORMAT="bestvideo+bestaudio" ;;
           esac
           
-          # تابع دانلود یک ویدیو
-          download_one() {
-            local URL="$1"
-            local INDEX="$2"
-            local TOTAL="$3"
-            
-            echo ""
-            echo "========================================="
-            echo "🎬 [$INDEX/$TOTAL] Starting: $URL"
-            echo "========================================="
-            
-            TMP_DIR="/tmp/download_${INDEX}"
-            mkdir -p "$TMP_DIR"
-            
-            # ساخت نام فایل امن
-            safe_name() {
-              echo "$1" | sed 's/[^a-zA-Z0-9\-]/_/g' | cut -c1-100
-            }
-            
-            # تلاش با روش‌های مختلف
-            for METHOD in 1 2 3; do
-              echo "🔄 Trying method $METHOD..."
-              
-              case $METHOD in
-                1)
-                  yt-dlp --proxy "socks5://127.0.0.1:1080" \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --write-thumbnail \
-                    --output "${TMP_DIR}/%(title)s.%(ext)s" \
-                    --no-playlist \
-                    --retries 10 \
-                    --fragment-retries 10 \
-                    --progress \
-                    "$URL" && break
-                  ;;
-                2)
-                  yt-dlp --proxy "socks5://127.0.0.1:1080" \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --output "${TMP_DIR}/%(title)s.%(ext)s" \
-                    --extractor-args "youtube:player_client=android" \
-                    --no-playlist \
-                    "$URL" && break
-                  ;;
-                3)
-                  yt-dlp \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --output "${TMP_DIR}/%(title)s.%(ext)s" \
-                    --no-playlist \
-                    "$URL" && break
-                  ;;
-              esac
-              
-              echo "⚠️ Method $METHOD failed, retrying..."
-              sleep 3
-            done || {
-              echo "❌ Failed to download: $URL"
-              return 1
-            }
-            
-            # پیدا کردن فایل دانلود شده
-            VIDEO_FILE=$(find "$TMP_DIR" -type f ! -name "*.jpg" ! -name "*.webp" | head -1)
-            if [ -z "$VIDEO_FILE" ]; then
-              echo "❌ No video file found!"
-              return 1
-            fi
-            
-            # استخراج اطلاعات
-            BASENAME=$(basename "$VIDEO_FILE")
-            FILENAME_NO_EXT="${BASENAME%.*}"
-            EXT="${BASENAME##*.}"
-            SAFE_NAME=$(safe_name "$FILENAME_NO_EXT")
-            
-            mkdir -p "$BACKUP_DIR/$SAFE_NAME"
-            
-            # کپی thumbnail
-            THUMB_FILE=$(find "$TMP_DIR" -name "*.jpg" -o -name "*.webp" | head -1)
-            if [ -n "$THUMB_FILE" ]; then
-              cp "$THUMB_FILE" "$BACKUP_DIR/$SAFE_NAME/thumbnail.jpg"
-            fi
-            
-            # فشرده‌سازی با یا بدون رمز
-            SIZE=$(stat -c%s "$VIDEO_FILE")
-            SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
-            
-            if [ -n "$PASSWORD" ]; then
-              zip -j -P "$PASSWORD" "$BACKUP_DIR/$SAFE_NAME/$SAFE_NAME.zip" "$VIDEO_FILE"
-              FINAL_FILE="$SAFE_NAME.zip"
-            else
-              cp "$VIDEO_FILE" "$BACKUP_DIR/$SAFE_NAME/$SAFE_NAME.$EXT"
-              FINAL_FILE="$SAFE_NAME.$EXT"
-            fi
-            
-            # ساخت README
-            cat > "$BACKUP_DIR/$SAFE_NAME/README.md" << EOF
-# $FILENAME_NO_EXT
-
-## Video Info
-- **Quality**: $QUALITY
-- **Size**: $SIZE_MB MB
-- **Source**: [YouTube]($URL)
-
-## Download
-- **File**: [$FINAL_FILE]($FINAL_FILE)
-
-EOF
-            
-            echo "✅ [$INDEX/$TOTAL] Completed: $SAFE_NAME ($SIZE_MB MB)"
-            echo "$SAFE_NAME|$URL" >> /tmp/downloaded.txt
-            return 0
+          sanitize_name() {
+            echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
           }
           
-          export -f download_one
-          export QUALITY PASSWORD BACKUP_DIR
+          TOTAL_URLS=$(wc -l < all_urls.txt)
+          INDEX=0
+          SUCCESS_COUNT=0
+          FAILED_URLS=""
           
-          # دانلود موازی
-          TOTAL=$(cat all_urls.txt | wc -l)
-          echo "📥 Starting parallel downloads (max $PARALLEL at a time)..."
+          while IFS= read -r URL; do
+            INDEX=$((INDEX + 1))
+            echo ""
+            echo "========================================="
+            echo "🎬 [$INDEX/$TOTAL_URLS] در حال پردازش: $URL"
+            echo "========================================="
+            
+            TMP_DIR="tmp_downloads_${INDEX}"
+            mkdir -p "$TMP_DIR"
+            DOWNLOAD_SUCCESS=false
+            
+            # تلاش با روش‌های مختلف
+            for METHOD in 1 2 3 4 5; do
+              echo "🔄 روش دانلود $METHOD..."
+              
+              if [ "$QUALITY" = "audio" ]; then
+                if yt-dlp --proxy "socks5://127.0.0.1:1080" \
+                  --extract-audio --audio-format mp3 --audio-quality 0 \
+                  --output "${TMP_DIR}/%(title)s.%(ext)s" \
+                  --no-playlist --retries 5 --fragment-retries 5 \
+                  "$URL" 2>/dev/null; then
+                  DOWNLOAD_SUCCESS=true
+                  echo "✅ دانلود موفق با روش $METHOD"
+                  break
+                fi
+              else
+                if yt-dlp --proxy "socks5://127.0.0.1:1080" \
+                  --format "$FORMAT" --merge-output-format mp4 \
+                  --write-thumbnail --convert-thumbnails jpg \
+                  --output "${TMP_DIR}/%(title)s.%(ext)s" \
+                  --no-playlist --retries 5 --fragment-retries 5 \
+                  "$URL" 2>/dev/null; then
+                  DOWNLOAD_SUCCESS=true
+                  echo "✅ دانلود موفق با روش $METHOD"
+                  break
+                fi
+              fi
+              
+              echo "⚠️ روش $METHOD ناموفق، تلاش مجدد..."
+              sleep 3
+            done
+            
+            if [ "$DOWNLOAD_SUCCESS" = false ]; then
+              echo "❌ دانلود ناموفق: $URL"
+              FAILED_URLS="${FAILED_URLS}\n$URL"
+              rm -rf "$TMP_DIR"
+              continue
+            fi
+            
+            # پردازش فایل دانلود شده
+            for FILE in "$TMP_DIR"/*; do
+              [ -f "$FILE" ] || continue
+              if [[ "$FILE" == *.jpg ]] || [[ "$FILE" == *.webp ]]; then
+                continue
+              fi
+              
+              BASENAME=$(basename "$FILE")
+              FILENAME_NO_EXT="${BASENAME%.*}"
+              EXT="${BASENAME##*.}"
+              FILENAME_NO_EXT=$(sanitize_name "$FILENAME_NO_EXT")
+              
+              FINAL_FOLDER_NAME="${FILENAME_NO_EXT}"
+              mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
+              
+              THUMB_FILE=$(ls "$TMP_DIR"/*.jpg 2>/dev/null | head -1)
+              if [ -n "$THUMB_FILE" ]; then
+                cp "$THUMB_FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg"
+              fi
+              
+              SIZE=$(stat -c%s "$FILE")
+              SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+              
+              if [ -n "$PASSWORD" ]; then
+                zip -j -P "$PASSWORD" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                FINAL_FILE="${FINAL_FOLDER_NAME}.zip"
+              else
+                cp "$FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.${EXT}"
+                FINAL_FILE="${FINAL_FOLDER_NAME}.${EXT}"
+              fi
+              
+              echo "${FILENAME_NO_EXT}|${URL}" >> /tmp/downloaded.txt
+              
+              echo "✅ ذخیره شد: ${FINAL_FOLDER_NAME} (${SIZE_MB} MB)"
+            done
+            
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            rm -rf "$TMP_DIR"
+          done < all_urls.txt
           
-          cat all_urls.txt | nl -w1 -s'|' | \
-            parallel --jobs "$PARALLEL" --colsep '|' \
-              "download_one '{2}' '{1}' '$TOTAL'"
-          
-          # جمع‌آوری نتایج
           echo "$BACKUP_DIR" > /tmp/backup_dir_path.txt
-          echo "✅ Download phase completed"
+          
+          echo ""
+          echo "========================================="
+          echo "📊 گزارش نهایی دانلود"
+          echo "========================================="
+          echo "✅ موفق: $SUCCESS_COUNT از $TOTAL_URLS"
+          if [ -n "$FAILED_URLS" ]; then
+            echo "❌ ناموفق:"
+            echo -e "$FAILED_URLS"
+          fi
+          echo "========================================="
 
       - name: دانلود زیرنویس
-        if: ${{ github.event.inputs.download_subtitles == 'true' }}
+        if: github.event.inputs.download_subtitles == 'true'
         run: |
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           
@@ -298,7 +247,7 @@ EOF
             SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitles"
             mkdir -p "$SUBTITLE_DIR"
             
-            echo "📝 Downloading subtitles for: $FOLDER_NAME"
+            echo "📝 دانلود زیرنویس برای: $FOLDER_NAME"
             yt-dlp --proxy "socks5://127.0.0.1:1080" \
               --write-sub --sub-langs fa,en \
               --sub-format vtt \
@@ -309,7 +258,7 @@ EOF
             if [ -n "$(find "$SUBTITLE_DIR" -name "*.vtt" 2>/dev/null)" ]; then
               (cd "$SUBTITLE_DIR" && zip -j "../subtitles.zip" *.vtt 2>/dev/null)
               rm -rf "$SUBTITLE_DIR"
-              echo "✅ Subtitles saved for: $FOLDER_NAME"
+              echo "✅ زیرنویس ذخیره شد: $FOLDER_NAME"
             else
               rm -rf "$SUBTITLE_DIR"
             fi
@@ -321,12 +270,12 @@ EOF
           docker stop warp 2>/dev/null || true
           docker rm warp 2>/dev/null || true
 
-      - name: آپلود به مخزن
+      - name: ارسال به مخزن
         run: |
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           
           if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR")" ]; then
-            echo "⚠️ No files to upload"
+            echo "⚠️ فایلی برای آپلود وجود ندارد"
             exit 0
           fi
           
@@ -336,19 +285,18 @@ EOF
           mkdir -p videos
           cp -r "$BACKUP_DIR"/* videos/
           
-          # ساخت README اصلی
           cat > videos/README.md << 'EOF'
-# 📥 Downloaded Videos
+# 📥 ویدیوهای دانلود شده
 
-| # | Video Name | Download |
-|---|------------|----------|
+| شماره | نام ویدیو |
+|-------|-----------|
 EOF
           
           COUNT=1
           for folder in videos/*/; do
             if [ -d "$folder" ]; then
               NAME=$(basename "$folder")
-              echo "| $COUNT | $NAME | [Open](./$NAME/) |" >> videos/README.md
+              echo "| $COUNT | [$NAME](./$NAME/) |" >> videos/README.md
               COUNT=$((COUNT + 1))
             fi
           done
@@ -356,14 +304,15 @@ EOF
           git add -f videos/
           
           if ! git diff --cached --quiet; then
-            git commit -m "🎬 YouTube download [skip ci]"
+            git commit -m "🎬 دانلود خودکار ویدیو [skip ci]"
             git push origin HEAD:${{ github.ref_name }} || true
-            echo "✅ Successfully uploaded to repository"
+            echo "✅ فایل‌ها با موفقیت آپلود شدند"
           else
-            echo "ℹ️ No new changes to commit"
+            echo "ℹ️ تغییر جدیدی برای ارسال وجود ندارد"
           fi
           
+          echo ""
           echo "========================================="
-          echo "🎉 All downloads completed successfully!"
-          echo "📁 Files saved in 'videos' folder"
+          echo "🎉 دانلود با موفقیت کامل شد!"
+          echo "📁 فایل‌ها در پوشه 'videos' ذخیره شدند"
           echo "========================================="
