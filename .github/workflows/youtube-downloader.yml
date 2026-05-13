@@ -59,7 +59,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-      - name: راه‌اندازی Cloudflare WARP (پروکسی برای دور زدن محدودیت)
+      - name: راه‌اندازی Cloudflare WARP
         run: |
           echo "در حال راه‌اندازی Cloudflare WARP..."
           docker network create warp-net || true
@@ -202,15 +202,13 @@ jobs:
               
               SIZE_MB=$(echo "scale=2; $SIZE / 1024 / 1024" | bc)
               
-              # ── ساخت فایل نهایی (تقسیم شده یا عادی) ──
+              # ── ساخت فایل نهایی ──
               if [ -n "$ZIP_PASSWORD" ]; then
-                # با رمز
                 zip -j -P "${ZIP_PASSWORD}" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
                 FILE_ENCODED=$(urlencode "${FINAL_FOLDER_NAME}.zip")
                 RAW_LINK="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/videos/${FOLDER_ENCODED}/${FILE_ENCODED}"
                 FILE_TYPE="zip"
               else
-                # بدون رمز
                 cp "$FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.${EXT}"
                 FILE_ENCODED=$(urlencode "${FINAL_FOLDER_NAME}.${EXT}")
                 RAW_LINK="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/videos/${FOLDER_ENCODED}/${FILE_ENCODED}"
@@ -279,16 +277,17 @@ EOF
           echo "$BACKUP_DIR" > /tmp/backup_dir_path.txt
           printf "%s\n" "${URL_LIST[@]}" > /tmp/yt_urls.txt
 
-      - name: دانلود زیرنویس (اختیاری)
-        if: ${{ github.event.inputs.download_subtitles == 'true' }}
+      - name: دانلود زیرنویس
+        if: github.event.inputs.download_subtitles == 'true'
         run: |
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
-          REPO_OWNER=${{ github.repository_owner }}
-          REPO_NAME=${{ github.event.repository.name }}
-          BRANCH=${{ github.ref_name }}
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
           
           download_subtitles() {
-            local URL=$1; local OUTPUT_DIR=$2;
+            local URL="$1"
+            local OUTPUT_DIR="$2"
             yt-dlp --proxy "socks5://127.0.0.1:1080" \
               --write-sub --sub-langs fa,en \
               --sub-format vtt \
@@ -300,7 +299,6 @@ EOF
           while IFS='|' read -r ORIGINAL_NAME FOLDER_NAME; do
             [ -z "$FOLDER_NAME" ] && continue
             
-            # یافتن URL متناظر
             URL_LINE=$(grep -n "$ORIGINAL_NAME" /tmp/yt_urls.txt | head -1 | cut -d: -f1)
             URL=$(sed -n "${URL_LINE}p" /tmp/yt_urls.txt)
             [ -z "$URL" ] && continue
@@ -312,7 +310,6 @@ EOF
             download_subtitles "$URL" "$SUBTITLE_DIR"
             
             if [ -n "$(find "$SUBTITLE_DIR" -name "*.vtt" 2>/dev/null)" ]; then
-              # زیپ کردن زیرنویس‌ها
               (cd "$SUBTITLE_DIR" && zip -j "../subtitles.zip" *.vtt 2>/dev/null)
               rm -rf "$SUBTITLE_DIR"
               echo "✅ زیرنویس‌ها ذخیره شدند"
@@ -331,8 +328,8 @@ EOF
       - name: ارسال فایل‌ها به مخزن
         run: |
           BRANCH="${GITHUB_REF_NAME}"
-          REPO_OWNER=${{ github.repository_owner }}
-          REPO_NAME=${{ github.event.repository.name }}
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           
           BACKUP_FILE_COUNT=$(find "$BACKUP_DIR" -type f 2>/dev/null | wc -l)
@@ -346,8 +343,7 @@ EOF
           mkdir -p videos
           cp -r "$BACKUP_DIR"/* videos/
           
-          # ساخت README اصلی
-          cat > videos/README.md << EOF
+          cat > videos/README.md << 'EOF'
 # 📥 ویدیوهای دانلود شده
 
 | شماره | نام ویدیو |
