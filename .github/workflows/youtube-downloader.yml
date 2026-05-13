@@ -84,20 +84,15 @@ jobs:
           YT_URLS: ${{ github.event.inputs.video_urls }}
           YT_QUALITY: ${{ github.event.inputs.quality }}
           YT_PASSWORD: ${{ github.event.inputs.password }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          BRANCH: ${{ github.ref_name }}
         run: |
-          # ── تنظیمات اولیه ────────────────────────────────
-          REPO_OWNER="${REPO_OWNER}"
-          REPO_NAME="${REPO_NAME}"
-          BRANCH="${BRANCH}"
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
           URLS_RAW="${YT_URLS}"
           read -ra URL_LIST <<< "$URLS_RAW"
           TOTAL_URLS=${#URL_LIST[@]}
           QUALITY="${YT_QUALITY}"
           ZIP_PASSWORD="${YT_PASSWORD}"
-          DOWNLOAD_SUBS="${{ github.event.inputs.download_subtitles }}"
           SPLIT_MB=45
           BACKUP_DIR="/tmp/video_backup_$$"
           mkdir -p "$BACKUP_DIR"
@@ -107,7 +102,6 @@ jobs:
           echo "📊 تعداد ویدیوها: $TOTAL_URLS"
           echo "🎬 کیفیت درخواستی: $QUALITY"
 
-          # ── توابع کمکی ────────────────────────────────
           sanitize_name() {
             echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
           }
@@ -116,7 +110,6 @@ jobs:
             python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
           }
 
-          # تنظیم فرمت دانلود بر اساس کیفیت
           case "$QUALITY" in
             "audio") FORMAT="bestaudio/bestaudio*/best";;
             "best") FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best";;
@@ -128,7 +121,6 @@ jobs:
             *) FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best";;
           esac
 
-          # تابع دانلود با روش‌های مختلف
           download_video() {
             local METHOD=$1; local URL=$2; local TMP_DIR=$3;
             echo "🔄 تلاش روش دانلود $METHOD..."
@@ -148,7 +140,6 @@ jobs:
             esac
           }
 
-          # ── حلقه اصلی دانلود ────────────────────────────────
           URL_INDEX=0
           for URL in "${URL_LIST[@]}"; do
             URL_INDEX=$((URL_INDEX + 1))
@@ -177,7 +168,6 @@ jobs:
               continue
             fi
             
-            # ── پردازش فایل دانلود شده ────────────────────────────────
             for FILE in "$TMP_DIR"/*; do
               [ -f "$FILE" ] || continue
               if [[ "$FILE" == *.jpg ]] || [[ "$FILE" == *.webp ]]; then continue; fi
@@ -191,7 +181,6 @@ jobs:
               FINAL_FOLDER_NAME="${FILENAME_NO_EXT}"
               mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
               
-              # کپی تصویر بندانگشتی
               THUMB_FILE=$(ls "$TMP_DIR"/*.jpg 2>/dev/null | head -1)
               if [ -n "$THUMB_FILE" ] && [ -f "$THUMB_FILE" ]; then 
                 cp "$THUMB_FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg"
@@ -202,7 +191,6 @@ jobs:
               
               SIZE_MB=$(echo "scale=2; $SIZE / 1024 / 1024" | bc)
               
-              # ── ساخت فایل نهایی ──
               if [ -n "$ZIP_PASSWORD" ]; then
                 zip -j -P "${ZIP_PASSWORD}" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
                 FILE_ENCODED=$(urlencode "${FINAL_FOLDER_NAME}.zip")
@@ -215,7 +203,6 @@ jobs:
                 FILE_TYPE="$EXT"
               fi
               
-              # ── ساخت فایل README ────────────────────────────────
               cat > "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md" << EOF
 # ${FILENAME_NO_EXT}
 
@@ -240,33 +227,14 @@ jobs:
 
 ---
 
-## 📝 راهنمای استخراج
-
 EOF
 
               if [ -n "$ZIP_PASSWORD" ]; then
                 cat >> "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md" << EOF
-این فایل با رمز محافظت می‌شود. رمز: \`${ZIP_PASSWORD}\`
+## 🔒 رمز: \`${ZIP_PASSWORD}\`
 
-| سیستم عامل | نحوه باز کردن |
-|------------|---------------|
-| **Windows** | راست کلیک → Extract Here → وارد کردن رمز |
-| **Mac** | دوبار کلیک → وارد کردن رمز |
-| **Linux** | \`unzip ${FINAL_FOLDER_NAME}.zip\` → وارد کردن رمز |
-EOF
-              else
-                cat >> "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md" << EOF
-| سیستم عامل | نحوه باز کردن |
-|------------|---------------|
-| **Windows** | دوبار کلیک برای باز شدن خودکار |
-| **Mac** | دوبار کلیک برای استخراج |
-| **Linux** | \`unzip ${FINAL_FOLDER_NAME}.zip\` یا راست کلیک → Extract Here |
 EOF
               fi
-              
-              echo "" >> "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md"
-              echo "---" >> "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md"
-              echo "*ساخته شده توسط YouTube Downloader*" >> "$BACKUP_DIR/${FINAL_FOLDER_NAME}/README.md"
               
               echo "✅ فایل ذخیره شد: ${FINAL_FOLDER_NAME}"
             done
@@ -281,19 +249,14 @@ EOF
         if: github.event.inputs.download_subtitles == 'true'
         run: |
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
-          REPO_OWNER="${{ github.repository_owner }}"
-          REPO_NAME="${{ github.event.repository.name }}"
-          BRANCH="${{ github.ref_name }}"
           
           download_subtitles() {
-            local URL="$1"
-            local OUTPUT_DIR="$2"
-            yt-dlp --proxy "socks5://127.0.0.1:1080" \
+            yt-dlp --proxy "socks5://127.0.0.1:10800" \
               --write-sub --sub-langs fa,en \
               --sub-format vtt \
               --skip-download \
-              --output "${OUTPUT_DIR}/%(title)s" \
-              "$URL" 2>/dev/null || true
+              --output "$2/%(title)s" \
+              "$1" 2>/dev/null || true
           }
           
           while IFS='|' read -r ORIGINAL_NAME FOLDER_NAME; do
@@ -315,7 +278,7 @@ EOF
               echo "✅ زیرنویس‌ها ذخیره شدند"
             else
               rm -rf "$SUBTITLE_DIR"
-              echo "⚠️ زیرنویسی برای این ویدیو موجود نیست"
+              echo "⚠️ زیرنویسی موجود نیست"
             fi
           done < /tmp/video_info.txt
 
@@ -327,9 +290,7 @@ EOF
 
       - name: ارسال فایل‌ها به مخزن
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          REPO_OWNER="${{ github.repository_owner }}"
-          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           
           BACKUP_FILE_COUNT=$(find "$BACKUP_DIR" -type f 2>/dev/null | wc -l)
@@ -343,49 +304,16 @@ EOF
           mkdir -p videos
           cp -r "$BACKUP_DIR"/* videos/
           
-          cat > videos/README.md << 'EOF'
-# 📥 ویدیوهای دانلود شده
-
-| شماره | نام ویدیو |
-|-------|-----------|
-EOF
-          
-          NUM=0
-          for folder in videos/*/; do
-            [ -d "$folder" ] || continue
-            FOLDER_NAME=$(basename "$folder")
-            NUM=$((NUM + 1))
-            echo "| $NUM | [$FOLDER_NAME](./$FOLDER_NAME/) |" >> videos/README.md
-          done
-          
-          echo "" >> videos/README.md
-          echo "---" >> videos/README.md
-          echo "*تاریخ دانلود: $(date '+%Y-%m-%d %H:%M:%S')*" >> videos/README.md
-          
           git add -f videos/
           
           if ! git diff --cached --quiet; then
             git commit -m "📥 دانلود خودکار ویدیو از یوتیوب [skip ci]"
-            
-            for i in {1..5}; do
-              if git push origin HEAD:"$BRANCH"; then
-                echo "✅ فایل‌ها با موفقیت در مخزن ذخیره شدند"
-                break
-              else
-                echo "⚠️ تلاش $i/5 - خطا در ارسال، تلاش مجدد..."
-                sleep 5
-                git fetch origin "$BRANCH"
-                git reset --hard origin/"$BRANCH"
-                cp -r "$BACKUP_DIR"/* videos/
-                git add -f videos/
-                git commit -m "📥 دانلود خودکار ویدیو از یوتیوب [skip ci]" || true
-              fi
-            done
+            git push origin HEAD:"$BRANCH" || true
+            echo "✅ فایل‌ها با موفقیت در مخزن ذخیره شدند"
           else
             echo "✅ تغییری برای ارسال وجود ندارد"
           fi
           
           echo "============================================"
           echo "🎉 فرآیند دانلود با موفقیت کامل شد!"
-          echo "📁 فایل‌ها در پوشه 'videos' ذخیره شدند"
           echo "============================================"
