@@ -34,7 +34,7 @@ on:
 
 jobs:
   download-youtube:
-    name: "📥 دانلود ویدیو از یوتیوب"
+    name: دانلود ویدیو از یوتیوب
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -43,21 +43,21 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: "📂 دریافت کد مخزن"
+      - name: دریافت کد مخزن
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: "⚙️ تنظیمات Git"
+      - name: تنظیمات Git
         run: |
           git config --global http.postBuffer 524288000
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: "🌐 راه‌اندازی WARP (پروکسی)"
+      - name: راه اندازی WARP
         run: |
-          echo "در حال راه‌اندازی کانتینر WARP..."
+          echo "در حال راه اندازی کانتینر WARP..."
           docker network create warp-net 2>/dev/null || true
           docker run -d \
             --name warp \
@@ -69,22 +69,21 @@ jobs:
             --sysctl net.ipv4.conf.all.src_valid_mark=1 \
             -v warp-data:/var/lib/cloudflare-warp \
             caomingjun/warp
-          echo "در انتظار راه‌اندازی WARP (15 ثانیه)..."
+          echo "در انتظار راه اندازی WARP (15 ثانیه)..."
           sleep 15
           echo "در حال تست اتصال WARP..."
           for i in 1 2 3 4 5; do
             RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
             if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
-              echo "✅ WARP با موفقیت فعال شد!"
-              echo "$RESULT"
+              echo "WARP با موفقیت فعال شد"
               break
             else
-              echo "تلاش $i/5 - WARP هنوز آماده نیست، در حال انتظار..."
+              echo "تلاش $i/5 - WARP هنوز آماده نیست"
               sleep 5
             fi
           done
 
-      - name: "📦 نصب پیش‌نیازها"
+      - name: نصب پیش نیازها
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
@@ -95,21 +94,19 @@ jobs:
           pip3 install --upgrade yt-dlp
           yt-dlp --version
 
-      - name: "🔍 پردازش لینک‌ها"
+      - name: پردازش لینک ها
         id: process
         run: |
           echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | sort -u > urls.txt
           COUNT=$(wc -l < urls.txt)
           echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
-          echo "========================================="
-          echo "📊 تعداد ویدیوها: $COUNT"
-          echo "========================================="
+          echo "تعداد ویدیوها: $COUNT"
           if [ $COUNT -eq 0 ]; then
-            echo "❌ خطا: هیچ لینک معتبری یافت نشد!"
+            echo "خطا: هیچ لینک معتبری یافت نشد"
             exit 1
           fi
 
-      - name: "📥 دانلود ویدیوها (با پشتیبانی از محدودیت سنی)"
+      - name: دانلود ویدیوها
         id: download
         env:
           QUALITY: ${{ github.event.inputs.quality }}
@@ -140,7 +137,7 @@ jobs:
             INDEX=$((INDEX + 1))
             echo ""
             echo "========================================="
-            echo "🎬 [$INDEX/$TOTAL] در حال دانلود: $URL"
+            echo "[$INDEX/$TOTAL] در حال دانلود: $URL"
             echo "========================================="
             
             TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
@@ -153,12 +150,12 @@ jobs:
             
             DOWNLOAD_OK=false
             
-            echo "📡 روش اندروید (مناسب ویدیوهای دارای محدودیت)..."
+            echo "روش اندروید (مناسب ویدیوهای دارای محدودیت)..."
             if yt-dlp --proxy socks5://127.0.0.1:1080 \
               -f "$FORMAT" \
               --merge-output-format mp4 \
               --extractor-args "youtube:player_client=android" \
-              --user-agent "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36" \
+              --user-agent "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36" \
               --no-check-certificates \
               --sleep-requests 2 \
               --sleep-interval 3 \
@@ -168,11 +165,11 @@ jobs:
               -o "$FOLDER/video.%(ext)s" \
               "$URL"; then
               DOWNLOAD_OK=true
-              echo "✅ دانلود با روش اندروید موفق بود"
+              echo "دانلود با روش اندروید موفق بود"
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "📡 روش وب کلاینت..."
+              echo "روش وب کلاینت..."
               if yt-dlp --proxy socks5://127.0.0.1:1080 \
                 -f "$FORMAT" \
                 --merge-output-format mp4 \
@@ -182,12 +179,12 @@ jobs:
                 -o "$FOLDER/video.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
-                echo "✅ دانلود با روش وب کلاینت موفق بود"
+                echo "دانلود با روش وب کلاینت موفق بود"
               fi
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "📡 دانلود فقط صدا..."
+              echo "دانلود فقط صدا..."
               if yt-dlp --proxy socks5://127.0.0.1:1080 \
                 -f "bestaudio" \
                 --extract-audio \
@@ -196,12 +193,12 @@ jobs:
                 -o "$FOLDER/audio.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
-                echo "✅ دانلود صدا موفق بود"
+                echo "دانلود صدا موفق بود"
               fi
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "❌ همه روش‌ها برای این لینک ناموفق بودند: $URL"
+              echo "همه روش ها برای این لینک ناموفق بودند: $URL"
               rm -rf "$FOLDER"
               continue
             fi
@@ -209,10 +206,11 @@ jobs:
             echo "Title: $TITLE" > "$FOLDER/info.txt"
             echo "URL: $URL" >> "$FOLDER/info.txt"
             echo "Quality: $QUALITY" >> "$FOLDER/info.txt"
-            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
+            DATE_VALUE=$(date '+%Y-%m-%d %H:%M:%S')
+            echo "Date: $DATE_VALUE" >> "$FOLDER/info.txt"
             
             if [ "$SUBTITLES" = "true" ]; then
-              echo "📝 در حال دانلود زیرنویس..."
+              echo "در حال دانلود زیرنویس..."
               yt-dlp --proxy socks5://127.0.0.1:1080 \
                 --write-sub \
                 --sub-langs fa,en \
@@ -224,68 +222,43 @@ jobs:
             fi
             
             SUCCESS=$((SUCCESS + 1))
-            echo "✅ دانلود شد: ${SAFE_NAME}"
+            echo "دانلود شد: ${SAFE_NAME}"
             
           done < urls.txt
           
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
 
-      - name: "✂️ تکه‌تکه کردن فایل‌های بزرگ (زیر 90 مگابایت)"
+      - name: تکه تکه کردن فایل های بزرگ
         run: |
-          echo "========================================="
-          echo "✂️ در حال تکه‌تکه کردن فایل‌های بزرگ..."
-          echo "========================================="
-          
+          echo "در حال تکه تکه کردن فایل های بزرگ..."
           SPLIT_SIZE=85m
-          cd videos
           
-          for folder in */; do
+          for folder in videos/*/; do
             if [ -d "$folder" ]; then
               cd "$folder"
-              
               VIDEO_FILE=$(ls video.mp4 2>/dev/null | head -1)
               if [ -n "$VIDEO_FILE" ] && [ -f "$VIDEO_FILE" ]; then
                 FILE_SIZE=$(stat -c%s "$VIDEO_FILE" 2>/dev/null || echo "0")
-                SIZE_MB=$((FILE_SIZE / 1024 / 1024))
-                
                 if [ "$FILE_SIZE" -gt 90000000 ]; then
-                  echo "📦 فایل ${SIZE_MB}MB است - نیاز به تکه‌تکه شدن دارد"
-                  
+                  echo "فایل بزرگ است - در حال تقسیم به قطعات"
                   split -b $SPLIT_SIZE -d "$VIDEO_FILE" "part_"
-                  
-                  cat > "merge_instructions.txt" << 'MERGEEOF'
-برای合并 فایل‌ها در ویندوز:
-copy /b part_00 + part_01 + part_02 + part_03 output.mp4
-
-برای合并 در لینوکس/مک:
-cat part_* > output.mp4
-MERGEEOF
-                  
+                  echo "برای合并 فایل ها در ویندوز:" > merge_instructions.txt
+                  echo "copy /b part_00 + part_01 + part_02 output.mp4" >> merge_instructions.txt
+                  echo "برای合并 در لینوکس/مک:" >> merge_instructions.txt
+                  echo "cat part_* > output.mp4" >> merge_instructions.txt
                   rm -f "$VIDEO_FILE"
-                  
-                  PART_COUNT=$(ls part_* 2>/dev/null | wc -l)
-                  echo "✅ فایل به $PART_COUNT قطعه تقسیم شد"
-                else
-                  echo "✅ فایل ${SIZE_MB}MB است - نیازی به تکه‌تکه شدن ندارد"
                 fi
               fi
-              
               cd ..
             fi
           done
-          
-          cd ..
 
-      - name: "📦 فشرده‌سازی نهایی (اختیاری)"
+      - name: فشرده سازی با رمز
         if: github.event.inputs.password != ''
         run: |
-          echo "========================================="
-          echo "🔒 در حال فشرده‌سازی با رمز..."
-          echo "========================================="
-          
+          echo "در حال فشرده سازی با رمز..."
           PASSWORD="${{ github.event.inputs.password }}"
-          
           for folder in videos/*/; do
             if [ -d "$folder" ]; then
               cd "$folder"
@@ -296,53 +269,46 @@ MERGEEOF
             fi
           done
 
-      - name: "🛑 توقف WARP"
+      - name: توقف WARP
         if: always()
         run: |
           docker stop warp 2>/dev/null || true
           docker rm warp 2>/dev/null || true
 
-      - name: "📤 ارسال به مخزن"
+      - name: ارسال به مخزن
         run: |
-          echo "========================================="
-          echo "📤 در حال ارسال فایل‌ها به مخزن..."
-          echo "========================================="
-          
+          echo "در حال ارسال فایل ها به مخزن..."
           git fetch origin
           git reset --hard origin/${{ github.ref_name }} 2>/dev/null || true
           
-          cat > videos/README.md << 'EOF'
-# 📥 ویدیوهای دانلود شده
-
-این فایل‌ها به صورت خودکار توسط GitHub Actions دانلود شده‌اند.
-
-## 📊 راهنمای合并 فایل‌های تکه‌تکه شده
-
-اگر فایل به چند قطعه تقسیم شده است:
-
-### ویندوز:
-copy /b part_00 + part_01 + part_02 output.mp4
-
-### لینوکس/مک:
-cat part_* > output.mp4
-
----
-📅 تاریخ دانلود: $(date '+%Y-%m-%d %H:%M:%S')
-EOF
+          echo "# ویدیوهای دانلود شده" > videos/README.md
+          echo "" >> videos/README.md
+          echo "این فایل ها به صورت خودکار توسط GitHub Actions دانلود شده اند" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "## راهنمای合并 فایل های تکه تکه شده" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "اگر فایل به چند قطعه تقسیم شده است:" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "### ویندوز:" >> videos/README.md
+          echo '```' >> videos/README.md
+          echo "copy /b part_00 + part_01 + part_02 output.mp4" >> videos/README.md
+          echo '```' >> videos/README.md
+          echo "" >> videos/README.md
+          echo "### لینوکس/مک:" >> videos/README.md
+          echo '```' >> videos/README.md
+          echo "cat part_* > output.mp4" >> videos/README.md
+          echo '```' >> videos/README.md
           
           git add videos/ 2>/dev/null || true
           
           if git diff --cached --quiet; then
-            echo "ℹ️ تغییر جدیدی برای ارسال وجود ندارد"
+            echo "تغییر جدیدی برای ارسال وجود ندارد"
           else
-            git commit -m "📥 دانلود خودکار ویدیوها [skip ci]"
-            
-            if ! git push origin HEAD:${{ github.ref_name }} 2>&1; then
-              echo "⚠️ خطا در ارسال به مخزن - فایل‌ها در Artifacts ذخیره شدند"
-            fi
+            git commit -m "دانلود خودکار ویدیوها"
+            git push origin HEAD:${{ github.ref_name }} || echo "خطا در ارسال به مخزن"
           fi
 
-      - name: "📦 آپلود آرتیفکت (پشتیبان)"
+      - name: آپلود آرتیفکت
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -350,16 +316,11 @@ EOF
           path: videos/
           retention-days: 7
 
-      - name: "📊 گزارش نهایی"
+      - name: گزارش نهایی
         run: |
           echo "========================================="
-          echo "📊 گزارش نهایی دانلود"
+          echo "گزارش نهایی دانلود"
           echo "========================================="
-          echo "✅ موفق: ${{ steps.download.outputs.success }}"
-          echo "📊 مجموع: ${{ steps.download.outputs.total }}"
-          echo "========================================="
-          echo ""
-          echo "📁 فایل‌ها در پوشه 'videos' ذخیره شدند"
-          echo "📥 در صورت موفقیت در push، در مخزن قابل مشاهده است"
-          echo "📦 در غیر این صورت، از بخش Actions آرتیفکت را دانلود کنید"
+          echo "موفق: ${{ steps.download.outputs.success }}"
+          echo "مجموع: ${{ steps.download.outputs.total }}"
           echo "========================================="
