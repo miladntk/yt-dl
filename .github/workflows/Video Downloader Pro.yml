@@ -49,13 +49,13 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Configure Git for Large Files
+      - name: Configure Git
         run: |
           git config --global http.postBuffer 524288000
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Start WARP Container (Working Image)
+      - name: Start WARP Container
         run: |
           echo "Starting Cloudflare WARP container..."
           docker network create warp-net 2>/dev/null || true
@@ -69,16 +69,13 @@ jobs:
             --sysctl net.ipv4.conf.all.src_valid_mark=1 \
             -v warp-data:/var/lib/cloudflare-warp \
             caomingjun/warp
-          
           echo "Waiting for WARP to initialize (15 seconds)..."
           sleep 15
-          
-          # تست اتصال WARP
           echo "Testing WARP connection..."
-          for i in {1..5}; do
+          for i in 1 2 3 4 5; do
             RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
             if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
-              echo "✅ WARP is active!"
+              echo "WARP is active!"
               echo "$RESULT"
               break
             else
@@ -91,33 +88,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
-          
-          # نصب deno برای روش‌های بهتر دانلود
           curl -fsSL https://deno.land/install.sh | sh
           export DENO_INSTALL="$HOME/.deno"
           export PATH="$DENO_INSTALL/bin:$PATH"
           echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
-          
           pip3 install --upgrade yt-dlp
           yt-dlp --version
 
       - name: Process URLs
         id: process
         run: |
-          echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | \
-            grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | \
-            sort -u > urls.txt
-          
+          echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | sort -u > urls.txt
           COUNT=$(wc -l < urls.txt)
           echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
           echo "Total videos: $COUNT"
-          
           if [ $COUNT -eq 0 ]; then
             echo "ERROR: No valid URLs found!"
             exit 1
           fi
 
-      - name: Download Videos (Multiple Methods)
+      - name: Download Videos
         id: download
         env:
           QUALITY: ${{ github.event.inputs.quality }}
@@ -127,38 +117,34 @@ jobs:
           sanitize_name() {
             echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
           }
-          
           case "$QUALITY" in
-            "audio") FORMAT="bestaudio/best" ;;
-            "best") FORMAT="bestvideo+bestaudio/best" ;;
-            "2160") FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
-            "1440") FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
-            "1080") FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
-            "720") FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
-            "480") FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
+            audio) FORMAT="bestaudio/best" ;;
+            best) FORMAT="bestvideo+bestaudio/best" ;;
+            2160) FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
+            1440) FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
+            1080) FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
+            720) FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
+            480) FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
             *) FORMAT="bestvideo+bestaudio/best" ;;
           esac
-          
           mkdir -p videos
           SUCCESS=0
           INDEX=0
           TOTAL=$(wc -l < urls.txt)
-          
           while IFS= read -r URL; do
             INDEX=$((INDEX + 1))
             echo ""
             echo "==========================================="
             echo "[$INDEX/$TOTAL] Downloading: $URL"
             echo "==========================================="
-            
             TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
-            [ -z "$TITLE" ] && TITLE="video_$INDEX"
+            if [ -z "$TITLE" ]; then
+              TITLE="video_$INDEX"
+            fi
             SAFE_NAME=$(sanitize_name "$TITLE")
             FOLDER="videos/${INDEX}_${SAFE_NAME}"
             mkdir -p "$FOLDER"
-            
             DOWNLOAD_OK=false
-            # 8 روش مختلف دانلود (مانند کد سالم)
             for METHOD in 1 2 3 4 5 6 7 8; do
               echo "Trying method $METHOD..."
               case $METHOD in
@@ -171,30 +157,28 @@ jobs:
                 7) yt-dlp --proxy socks5://127.0.0.1:1080 --extract-audio --audio-format mp3 -o "$FOLDER/audio.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
                 8) yt-dlp -f "bestaudio" --extract-audio --audio-format mp3 -o "$FOLDER/audio.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
               esac
-              [ "$DOWNLOAD_OK" = true ] && echo "✅ Success with method $METHOD" && break
+              if [ "$DOWNLOAD_OK" = true ]; then
+                echo "Success with method $METHOD"
+                break
+              fi
               sleep 2
             done
-            
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "❌ All methods failed for: $URL"
+              echo "All methods failed for: $URL"
               rm -rf "$FOLDER"
               continue
             fi
-            
-            # ایجاد README برای ویدیو
-            cat > "$FOLDER/README.md" << EOF
-# $TITLE
-
-- **Original Link:** [YouTube]($URL)
-- **Quality:** $QUALITY
-- **Download Date:** $(date '+%Y-%m-%d %H:%M:%S')
-EOF
-            
+            echo "Title: $TITLE" > "$FOLDER/info.txt"
+            echo "URL: $URL" >> "$FOLDER/info.txt"
+            echo "Quality: $QUALITY" >> "$FOLDER/info.txt"
+            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
+            if [ -n "$PASSWORD" ] && [ "$CREATE_ARCHIVE" = "true" ]; then
+              zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
+              rm -rf "$FOLDER"
+            fi
             SUCCESS=$((SUCCESS + 1))
-            echo "✅ Downloaded: $SAFE_NAME"
-            
+            echo "Downloaded: ${SAFE_NAME}"
           done < urls.txt
-          
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
 
@@ -208,234 +192,11 @@ EOF
         if: steps.download.outputs.success > 0
         run: |
           git add videos/
-          git commit -m "Downloaded ${{ steps.download.outputs.success }} videos [skip ci]" || echo "No changes"
-          git push origin HEAD:${{ github.ref_name }}
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: downloaded-videos
-          path: videos/
-          retention-days: 7
-
-      - name: Final Report
-        run: |
-          echo "==========================================="
-          echo "Success: ${{ steps.download.outputs.success }}"
-          echo "Total: ${{ steps.download.outputs.total }}"
-          echo "==========================================="name: YouTube Downloader Pro
-
-on:
-  workflow_dispatch:
-    inputs:
-      video_urls:
-        description: 'لینک ویدیو (لینک ها را با فاصله جدا کنید)'
-        required: true
-        type: string
-        default: ''
-      download_subtitles:
-        description: 'دانلود زیرنویس (فارسی و انگلیسی)'
-        required: false
-        default: false
-        type: boolean
-      quality:
-        description: 'کیفیت ویدیو'
-        required: false
-        default: 'best'
-        type: choice
-        options:
-          - best
-          - 2160
-          - 1440
-          - 1080
-          - 720
-          - 480
-          - audio
-      password:
-        description: 'رمز فایل زیپ (اختیاری)'
-        required: false
-        default: ''
-        type: string
-
-jobs:
-  download-youtube:
-    name: Download YouTube Videos
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Configure Git for Large Files
-        run: |
-          git config --global http.postBuffer 524288000
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Start WARP Container (Working Image)
-        run: |
-          echo "Starting Cloudflare WARP container..."
-          docker network create warp-net 2>/dev/null || true
-          docker run -d \
-            --name warp \
-            --restart=always \
-            --network warp-net \
-            -p 1080:1080 \
-            --cap-add NET_ADMIN \
-            --sysctl net.ipv6.conf.all.disable_ipv6=0 \
-            --sysctl net.ipv4.conf.all.src_valid_mark=1 \
-            -v warp-data:/var/lib/cloudflare-warp \
-            caomingjun/warp
-          
-          echo "Waiting for WARP to initialize (15 seconds)..."
-          sleep 15
-          
-          # تست اتصال WARP
-          echo "Testing WARP connection..."
-          for i in {1..5}; do
-            RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
-            if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
-              echo "✅ WARP is active!"
-              echo "$RESULT"
-              break
-            else
-              echo "Attempt $i/5 - WARP not ready yet, waiting..."
-              sleep 5
-            fi
-          done
-
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
-          
-          # نصب deno برای روش‌های بهتر دانلود
-          curl -fsSL https://deno.land/install.sh | sh
-          export DENO_INSTALL="$HOME/.deno"
-          export PATH="$DENO_INSTALL/bin:$PATH"
-          echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
-          
-          pip3 install --upgrade yt-dlp
-          yt-dlp --version
-
-      - name: Process URLs
-        id: process
-        run: |
-          echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | \
-            grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | \
-            sort -u > urls.txt
-          
-          COUNT=$(wc -l < urls.txt)
-          echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
-          echo "Total videos: $COUNT"
-          
-          if [ $COUNT -eq 0 ]; then
-            echo "ERROR: No valid URLs found!"
-            exit 1
+          if ! git diff --cached --quiet; then
+            git commit -m "Downloaded ${{ steps.download.outputs.success }} videos [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
+            git push origin HEAD:${{ github.ref_name }}
           fi
-
-      - name: Download Videos (Multiple Methods)
-        id: download
-        env:
-          QUALITY: ${{ github.event.inputs.quality }}
-          PASSWORD: ${{ github.event.inputs.password }}
-          SUBTITLES: ${{ github.event.inputs.download_subtitles }}
-        run: |
-          sanitize_name() {
-            echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
-          }
-          
-          case "$QUALITY" in
-            "audio") FORMAT="bestaudio/best" ;;
-            "best") FORMAT="bestvideo+bestaudio/best" ;;
-            "2160") FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
-            "1440") FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
-            "1080") FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
-            "720") FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
-            "480") FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
-            *) FORMAT="bestvideo+bestaudio/best" ;;
-          esac
-          
-          mkdir -p videos
-          SUCCESS=0
-          INDEX=0
-          TOTAL=$(wc -l < urls.txt)
-          
-          while IFS= read -r URL; do
-            INDEX=$((INDEX + 1))
-            echo ""
-            echo "==========================================="
-            echo "[$INDEX/$TOTAL] Downloading: $URL"
-            echo "==========================================="
-            
-            TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
-            [ -z "$TITLE" ] && TITLE="video_$INDEX"
-            SAFE_NAME=$(sanitize_name "$TITLE")
-            FOLDER="videos/${INDEX}_${SAFE_NAME}"
-            mkdir -p "$FOLDER"
-            
-            DOWNLOAD_OK=false
-            # 8 روش مختلف دانلود (مانند کد سالم)
-            for METHOD in 1 2 3 4 5 6 7 8; do
-              echo "Trying method $METHOD..."
-              case $METHOD in
-                1) yt-dlp --proxy socks5://127.0.0.1:1080 -f "$FORMAT" --merge-output-format mp4 --extractor-args "youtube:player_client=web" --js-runtimes deno --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                2) yt-dlp --proxy socks5://127.0.0.1:1080 -f "$FORMAT" --merge-output-format mp4 --extractor-args "youtube:player_client=mweb" -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                3) yt-dlp --proxy socks5://127.0.0.1:1080 -f "$FORMAT" --merge-output-format mp4 --extractor-args "youtube:player_client=android_vr" -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                4) yt-dlp -f "$FORMAT" --merge-output-format mp4 --extractor-args "youtube:player_client=web" --js-runtimes deno -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                5) yt-dlp -f "best" -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                6) yt-dlp --proxy socks5://127.0.0.1:1080 -f "bestvideo+bestaudio" --merge-output-format mp4 -o "$FOLDER/video.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                7) yt-dlp --proxy socks5://127.0.0.1:1080 --extract-audio --audio-format mp3 -o "$FOLDER/audio.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-                8) yt-dlp -f "bestaudio" --extract-audio --audio-format mp3 -o "$FOLDER/audio.%(ext)s" "$URL" && DOWNLOAD_OK=true ;;
-              esac
-              [ "$DOWNLOAD_OK" = true ] && echo "✅ Success with method $METHOD" && break
-              sleep 2
-            done
-            
-            if [ "$DOWNLOAD_OK" = false ]; then
-              echo "❌ All methods failed for: $URL"
-              rm -rf "$FOLDER"
-              continue
-            fi
-            
-            # ایجاد README برای ویدیو
-            cat > "$FOLDER/README.md" << EOF
-# $TITLE
-
-- **Original Link:** [YouTube]($URL)
-- **Quality:** $QUALITY
-- **Download Date:** $(date '+%Y-%m-%d %H:%M:%S')
-EOF
-            
-            SUCCESS=$((SUCCESS + 1))
-            echo "✅ Downloaded: $SAFE_NAME"
-            
-          done < urls.txt
-          
-          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-
-      - name: Stop WARP Container
-        if: always()
-        run: |
-          docker stop warp 2>/dev/null || true
-          docker rm warp 2>/dev/null || true
-
-      - name: Commit and Push
-        if: steps.download.outputs.success > 0
-        run: |
-          git add videos/
-          git commit -m "Downloaded ${{ steps.download.outputs.success }} videos [skip ci]" || echo "No changes"
-          git push origin HEAD:${{ github.ref_name }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
