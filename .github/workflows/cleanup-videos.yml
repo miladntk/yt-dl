@@ -1,0 +1,285 @@
+name: 🧹 Cleanup Videos Folder
+
+on:
+  workflow_dispatch:
+    inputs:
+      cleanup_mode:
+        description: '🧹 حالت پاکسازی'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - by_age
+          - by_size
+          - keep_latest
+      age_minutes:
+        description: '⏱️ حذف فایل‌های با عمر بیشتر از (دقیقه) - فقط در حالت by_age'
+        required: false
+        default: '5'
+        type: string
+      size_mb:
+        description: '💾 حذف فایل‌های بزرگتر از (مگابایت) - فقط در حالت by_size'
+        required: false
+        default: '100'
+        type: string
+      keep_count:
+        description: '📌 تعداد آخرین فایل‌ها برای نگهداری - فقط در حالت keep_latest'
+        required: false
+        default: '10'
+        type: string
+      include_subfolders:
+        description: '📁 شامل زیرپوشه‌ها نیز شود؟'
+        required: false
+        default: 'true'
+        type: boolean
+      dry_run:
+        description: '🔍 فقط نمایش (بدون حذف واقعی)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  cleanup:
+    name: "🧹 Cleanup Videos"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: دریافت کد مخزن
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: تنظیم Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: پاکسازی پوشه videos
+        id: cleanup
+        run: |
+          MODE="${{ github.event.inputs.cleanup_mode }}"
+          AGE_MINUTES="${{ github.event.inputs.age_minutes }}"
+          SIZE_MB="${{ github.event.inputs.size_mb }}"
+          KEEP_COUNT="${{ github.event.inputs.keep_count }}"
+          INCLUDE_SUBFOLDERS="${{ github.event.inputs.include_subfolders }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          
+          # تنظیمات پیش‌فرض
+          AGE_MINUTES="${AGE_MINUTES:-5}"
+          SIZE_MB="${SIZE_MB:-100}"
+          KEEP_COUNT="${KEEP_COUNT:-10}"
+          
+          # تابع محاسبه زمان فایل (بر حسب دقیقه)
+          get_file_age_minutes() {
+            local file="$1"
+            local file_time=$(stat -c %Y "$file")
+            local current_time=$(date +%s)
+            echo $(( (current_time - file_time) / 60 ))
+          }
+          
+          # تابع حذف امن با Git
+          safe_remove() {
+            local item="$1"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "🔍 [DRY RUN] Would remove: $item"
+              return 0
+            fi
+            
+            if [ -f "$item" ]; then
+              git rm -f "$item" 2>/dev/null || rm -f "$item"
+              echo "🗑️ Removed file: $item"
+            elif [ -d "$item" ]; then
+              git rm -rf "$item" 2>/dev/null || rm -rf "$item"
+              echo "🗑️ Removed folder: $item"
+            fi
+          }
+          
+          # بررسی وجود پوشه videos
+          if [ ! -d "videos" ]; then
+            echo "⚠️ پوشه 'videos' وجود ندارد!"
+            exit 0
+          fi
+          
+          echo "========================================="
+          echo "🧹 شروع پاکسازی پوشه videos"
+          echo "========================================="
+          echo "📋 حالت: $MODE"
+          echo "🔍 Dry Run: $DRY_RUN"
+          echo "📁 شامل زیرپوشه‌ها: $INCLUDE_SUBFOLDERS"
+          echo ""
+          
+          # ذخیره آمار
+          TOTAL_SIZE_BEFORE=$(du -sb videos 2>/dev/null | cut -f1 || echo "0")
+          TOTAL_FILES_BEFORE=$(find videos -type f 2>/dev/null | wc -l)
+          
+          echo "📊 وضعیت قبل از پاکسازی:"
+          echo "   - تعداد فایل‌ها: $TOTAL_FILES_BEFORE"
+          echo "   - حجم کل: $(numfmt --to=iec $TOTAL_SIZE_BEFORE 2>/dev/null || echo "$TOTAL_SIZE_BEFORE bytes")"
+          echo ""
+          
+          # لیست فایل‌هایی که حذف می‌شوند
+          DELETED_ITEMS=""
+          
+          case "$MODE" in
+            "all")
+              echo "🗑️ حذف همه محتویات پوشه videos..."
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "🔍 [DRY RUN] Would remove entire videos folder"
+              else
+                rm -rf videos/*
+                # ایجاد مجدد پوشه خالی
+                mkdir -p videos
+                echo "# 📥 ویدیوهای دانلود شده" > videos/README.md
+                git add videos/README.md
+                echo "✅ همه فایل‌ها حذف شدند"
+              fi
+              ;;
+            
+            "by_age")
+              echo "⏱️ حذف فایل‌های با عمر بیشتر از ${AGE_MINUTES} دقیقه..."
+              
+              if [ "$INCLUDE_SUBFOLDERS" = "true" ]; then
+                FIND_CMD="find videos -type f"
+              else
+                FIND_CMD="find videos -maxdepth 1 -type f"
+              fi
+              
+              eval "$FIND_CMD" | while read -r file; do
+                AGE=$(get_file_age_minutes "$file")
+                if [ $AGE -gt $AGE_MINUTES ]; then
+                  echo "   ⏰ فایل با عمر ${AGE} دقیقه: $(basename "$file")"
+                  safe_remove "$file"
+                  DELETED_ITEMS="${DELETED_ITEMS}\n$file"
+                fi
+              done
+              
+              # حذف پوشه‌های خالی
+              if [ "$DRY_RUN" != "true" ]; then
+                find videos -type d -empty -delete 2>/dev/null || true
+              fi
+              ;;
+            
+            "by_size")
+              echo "💾 حذف فایل‌های بزرگتر از ${SIZE_MB} مگابایت..."
+              
+              SIZE_BYTES=$((SIZE_MB * 1048576))
+              
+              if [ "$INCLUDE_SUBFOLDERS" = "true" ]; then
+                FIND_CMD="find videos -type f -size +${SIZE_BYTES}c"
+              else
+                FIND_CMD="find videos -maxdepth 1 -type f -size +${SIZE_BYTES}c"
+              fi
+              
+              eval "$FIND_CMD" | while read -r file; do
+                FILE_SIZE=$(stat -c%s "$file")
+                FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+                echo "   📦 فایل ${FILE_SIZE_MB}MB: $(basename "$file")"
+                safe_remove "$file"
+                DELETED_ITEMS="${DELETED_ITEMS}\n$file"
+              done
+              
+              # حذف پوشه‌های خالی
+              if [ "$DRY_RUN" != "true" ]; then
+                find videos -type d -empty -delete 2>/dev/null || true
+              fi
+              ;;
+            
+            "keep_latest")
+              echo "📌 نگهداری آخرین ${KEEP_COUNT} فایل و حذف بقیه..."
+              
+              # ایجاد لیست فایل‌ها بر اساس زمان تغییر (جدیدترین اول)
+              if [ "$INCLUDE_SUBFOLDERS" = "true" ]; then
+                FILE_LIST=$(find videos -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+              else
+                FILE_LIST=$(find videos -maxdepth 1 -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+              fi
+              
+              COUNT=0
+              echo "$FILE_LIST" | while read -r file; do
+                [ -z "$file" ] && continue
+                COUNT=$((COUNT + 1))
+                if [ $COUNT -gt $KEEP_COUNT ]; then
+                  FILE_AGE=$(get_file_age_minutes "$file")
+                  echo "   🗑️ حذف فایل قدیمی #${COUNT}: $(basename "$file") (عمر: ${FILE_AGE} دقیقه)"
+                  safe_remove "$file"
+                  DELETED_ITEMS="${DELETED_ITEMS}\n$file"
+                else
+                  echo "   ✅ نگهداری فایل #${COUNT}: $(basename "$file")"
+                fi
+              done
+              
+              # حذف پوشه‌های خالی
+              if [ "$DRY_RUN" != "true" ]; then
+                find videos -type d -empty -delete 2>/dev/null || true
+              fi
+              ;;
+            
+            *)
+              echo "❌ حالت نامعتبر: $MODE"
+              exit 1
+              ;;
+          esac
+          
+          # آمار نهایی
+          if [ "$DRY_RUN" != "true" ]; then
+            TOTAL_SIZE_AFTER=$(du -sb videos 2>/dev/null | cut -f1 || echo "0")
+            TOTAL_FILES_AFTER=$(find videos -type f 2>/dev/null | wc -l)
+            
+            echo ""
+            echo "========================================="
+            echo "📊 گزارش نهایی پاکسازی"
+            echo "========================================="
+            echo "📉 فایل‌های قبل: $TOTAL_FILES_BEFORE"
+            echo "📈 فایل‌های بعد: $TOTAL_FILES_AFTER"
+            echo "🗑️  فایل‌های حذف شده: $((TOTAL_FILES_BEFORE - TOTAL_FILES_AFTER))"
+            echo ""
+            echo "💾 حجم قبل: $(numfmt --to=iec $TOTAL_SIZE_BEFORE 2>/dev/null || echo "$TOTAL_SIZE_BEFORE bytes")"
+            echo "💿 حجم بعد: $(numfmt --to=iec $TOTAL_SIZE_AFTER 2>/dev/null || echo "$TOTAL_SIZE_AFTER bytes")"
+            echo "🎯 حجم آزاد شده: $(numfmt --to=iec $((TOTAL_SIZE_BEFORE - TOTAL_SIZE_AFTER)) 2>/dev/null || echo "$((TOTAL_SIZE_BEFORE - TOTAL_SIZE_AFTER)) bytes")"
+            
+            # به‌روزرسانی README اگر خالی شد
+            if [ $TOTAL_FILES_AFTER -eq 0 ] && [ -f "videos/README.md" ]; then
+              echo "# 📥 ویدیوهای دانلود شده" > videos/README.md
+              echo "" >> videos/README.md
+              echo "**وضعیت:** پوشه خالی است" >> videos/README.md
+              git add videos/README.md
+            fi
+            
+            # ارسال تغییرات به مخزن
+            if ! git diff --cached --quiet; then
+              git commit -m "🧹 پاکسازی خودکار videos [skip ci]"
+              git push origin HEAD:${{ github.ref_name }} || true
+              echo ""
+              echo "✅ تغییرات با موفقیت به مخزن ارسال شد"
+            else
+              echo ""
+              echo "ℹ️ هیچ تغییری برای ارسال وجود ندارد"
+            fi
+          else
+            echo ""
+            echo "🔍 حالت Dry Run - هیچ فایلی واقعاً حذف نشد"
+          fi
+          
+          echo ""
+          echo "========================================="
+          echo "🎉 عملیات پاکسازی کامل شد!"
+          echo "========================================="
+
+      - name: نمایش وضعیت نهایی (اختیاری)
+        if: always()
+        run: |
+          echo ""
+          echo "📁 ساختار نهایی پوشه videos:"
+          echo "----------------------------------------"
+          if [ -d "videos" ]; then
+            ls -lah videos/
+            echo ""
+            echo "تعداد کل فایل‌ها: $(find videos -type f | wc -l)"
+            echo "حجم کل: $(du -sh videos | cut -f1)"
+          else
+            echo "پوشه videos وجود ندارد"
+          fi
