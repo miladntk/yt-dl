@@ -1,17 +1,5 @@
-# ویدیوهای دانلود شده
+# 📥 ویدیوهای دانلود شده
 
-این فایل ها به صورت خودکار توسط GitHub Actions دانلود شده اند
-
-## راهنمای合并 فایل های تکه تکه شده
-
-اگر فایل به چند قطعه تقسیم شده است:
-
-### ویندوز:
-```
-copy /b part_00 + part_01 + part_02 output.mp4
-```
-
-### لینوکس/مک:
-```
-cat part_* > output.mp4
-```
+| شماره | نام ویدیو |
+|-------|-----------|
+| 1 | [1_Papa-Love-Iran-🔥-Strait-of-Hormuz-Closed-｜-Afro-Bass-Song-Persian-Gulf-Cinematic-Song-🔥#iran](./1_Papa-Love-Iran-🔥-Strait-of-Hormuz-Closed-｜-Afro-Bass-Song-Persian-Gulf-Cinematic-Song-🔥#iran/) |
