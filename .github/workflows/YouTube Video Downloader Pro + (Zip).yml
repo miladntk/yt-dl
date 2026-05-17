@@ -1,0 +1,387 @@
+name: YouTube Video Downloader Pro + (Zip)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_urls:
+        description: '🔗 لینک ویدیو (لینک‌ها را با , یا فاصله یا + جدا کنید)'
+        required: true
+        type: string
+        default: ''
+      download_subtitles:
+        description: '📝 دانلود زیرنویس (فارسی و انگلیسی)'
+        required: false
+        default: false
+        type: boolean
+      quality:
+        description: '🎬 کیفیت ویدیو'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - audio
+      password:
+        description: '🔒 رمز فایل (اختیاری)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  download-youtube:
+    name: "📥 YouTube Downloader Pro"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: دریافت کد مخزن
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: تنظیم Git
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: راه‌اندازی WARP Proxy
+        run: |
+          echo "🌐 Starting Cloudflare WARP..."
+          docker network create warp-net 2>/dev/null || true
+          docker run -d \
+            --name warp \
+            --restart always \
+            --network warp-net \
+            -p 1080:1080 \
+            --cap-add NET_ADMIN \
+            caomingjun/warp
+          sleep 15
+
+      - name: نصب پیش‌نیازها
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ffmpeg zip p7zip-full curl jq bc
+          pip3 install --upgrade yt-dlp
+
+      - name: پردازش لینک‌ها
+        id: process_urls
+        run: |
+          INPUT_URLS="${{ github.event.inputs.video_urls }}"
+          
+          CLEAN_URLS=$(echo "$INPUT_URLS" | sed 's/[,+]/ /g' | tr -s ' ')
+          echo "$CLEAN_URLS" | tr ' ' '\n' | grep -v '^$' > all_urls.txt
+          
+          TOTAL_URLS=$(wc -l < all_urls.txt)
+          echo "total_urls=$TOTAL_URLS" >> $GITHUB_OUTPUT
+          
+          echo "========================================="
+          echo "📊 تعداد ویدیوها: $TOTAL_URLS"
+          echo "========================================="
+          echo ""
+          echo "📋 لینک‌های وارد شده:"
+          cat all_urls.txt
+          echo ""
+
+      - name: دانلود ویدیوها
+        env:
+          QUALITY: ${{ github.event.inputs.quality }}
+          PASSWORD: ${{ github.event.inputs.password }}
+        run: |
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
+          QUALITY="${QUALITY:-best}"
+          PASSWORD="${PASSWORD}"
+          
+          BACKUP_DIR="/tmp/video_backup_$$"
+          mkdir -p "$BACKUP_DIR" videos
+          
+          case "$QUALITY" in
+            "audio") FORMAT="bestaudio/bestaudio*/best" ;;
+            "best") FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best" ;;
+            "2160") FORMAT="bestvideo[height<=2160]+bestaudio" ;;
+            "1440") FORMAT="bestvideo[height<=1440]+bestaudio" ;;
+            "1080") FORMAT="bestvideo[height<=1080]+bestaudio" ;;
+            "720") FORMAT="bestvideo[height<=720]+bestaudio" ;;
+            "480") FORMAT="bestvideo[height<=480]+bestaudio" ;;
+            *) FORMAT="bestvideo+bestaudio" ;;
+          esac
+          
+          sanitize_name() {
+            echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
+          }
+          
+          TOTAL_URLS=$(wc -l < all_urls.txt)
+          INDEX=0
+          SUCCESS_COUNT=0
+          FAILED_URLS=""
+          
+          while IFS= read -r URL; do
+            INDEX=$((INDEX + 1))
+            echo ""
+            echo "========================================="
+            echo "🎬 [$INDEX/$TOTAL_URLS] در حال پردازش: $URL"
+            echo "========================================="
+            
+            TMP_DIR="tmp_downloads_${INDEX}"
+            mkdir -p "$TMP_DIR"
+            DOWNLOAD_SUCCESS=false
+            
+            for METHOD in 1 2 3 4 5; do
+              echo "🔄 روش دانلود $METHOD..."
+              
+              if [ "$QUALITY" = "audio" ]; then
+                if yt-dlp --proxy "socks5://127.0.0.1:1080" \
+                  --extract-audio --audio-format mp3 --audio-quality 0 \
+                  --output "${TMP_DIR}/%(title)s.%(ext)s" \
+                  --no-playlist --retries 5 --fragment-retries 5 \
+                  "$URL" 2>/dev/null; then
+                  DOWNLOAD_SUCCESS=true
+                  echo "✅ دانلود موفق با روش $METHOD"
+                  break
+                fi
+              else
+                if yt-dlp --proxy "socks5://127.0.0.1:1080" \
+                  --format "$FORMAT" --merge-output-format mp4 \
+                  --write-thumbnail --convert-thumbnails jpg \
+                  --output "${TMP_DIR}/%(title)s.%(ext)s" \
+                  --no-playlist --retries 5 --fragment-retries 5 \
+                  "$URL" 2>/dev/null; then
+                  DOWNLOAD_SUCCESS=true
+                  echo "✅ دانلود موفق با روش $METHOD"
+                  break
+                fi
+              fi
+              
+              echo "⚠️ روش $METHOD ناموفق، تلاش مجدد..."
+              sleep 3
+            done
+            
+            if [ "$DOWNLOAD_SUCCESS" = false ]; then
+              echo "❌ دانلود ناموفق: $URL"
+              FAILED_URLS="${FAILED_URLS}\n$URL"
+              rm -rf "$TMP_DIR"
+              continue
+            fi
+            
+            for FILE in "$TMP_DIR"/*; do
+              [ -f "$FILE" ] || continue
+              if [[ "$FILE" == *.jpg ]] || [[ "$FILE" == *.webp ]]; then
+                continue
+              fi
+              
+              BASENAME=$(basename "$FILE")
+              FILENAME_NO_EXT="${BASENAME%.*}"
+              EXT="${BASENAME##*.}"
+              CLEAN_NAME=$(sanitize_name "$FILENAME_NO_EXT")
+              
+              # اضافه کردن شماره به نام فایل
+              FINAL_FOLDER_NAME="${INDEX}_${CLEAN_NAME}"
+              mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
+              
+              THUMB_FILE=$(ls "$TMP_DIR"/*.jpg 2>/dev/null | head -1)
+              if [ -n "$THUMB_FILE" ]; then
+                cp "$THUMB_FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg"
+              fi
+              
+              SIZE=$(stat -c%s "$FILE")
+              SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+              
+              # بررسی حجم فایل و تصمیم‌گیری برای فشرده‌سازی
+              if [ $(echo "$SIZE_MB > 90" | bc) -eq 1 ]; then
+                echo "⚠️ فایل ${SIZE_MB} MB است (بزرگتر از 90 MB)"
+                echo "📦 در حال تقسیم به قطعات 70 مگابایتی..."
+                
+                # ایجاد zip با قطعات 70 مگابایتی
+                if [ -n "$PASSWORD" ]; then
+                  zip -j -s 70m -P "$PASSWORD" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                else
+                  zip -j -s 70m "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                fi
+                
+                # حذف فایل اصلی بعد از زیپ کردن
+                rm -f "$FILE"
+                echo "✅ فایل به قطعات ${SIZE_MB} MB تقسیم شد"
+              else
+                # فایل کوچک است، معمولی ذخیره می‌شود
+                if [ -n "$PASSWORD" ]; then
+                  zip -j -P "$PASSWORD" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                else
+                  cp "$FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.${EXT}"
+                fi
+              fi
+              
+              echo "${FINAL_FOLDER_NAME}|${URL}" >> /tmp/downloaded.txt
+              echo "✅ ذخیره شد: ${FINAL_FOLDER_NAME} (${SIZE_MB} MB)"
+            done
+            
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            rm -rf "$TMP_DIR"
+          done < all_urls.txt
+          
+          echo "$BACKUP_DIR" > /tmp/backup_dir_path.txt
+          
+          echo ""
+          echo "========================================="
+          echo "📊 گزارش نهایی دانلود"
+          echo "========================================="
+          echo "✅ موفق: $SUCCESS_COUNT از $TOTAL_URLS"
+          if [ -n "$FAILED_URLS" ]; then
+            echo "❌ ناموفق:"
+            echo -e "$FAILED_URLS"
+          fi
+
+      - name: دانلود زیرنویس
+        if: github.event.inputs.download_subtitles == 'true'
+        run: |
+          BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
+          
+          while IFS='|' read -r FOLDER_NAME URL; do
+            [ -z "$FOLDER_NAME" ] && continue
+            
+            SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitles"
+            mkdir -p "$SUBTITLE_DIR"
+            
+            echo "📝 دانلود زیرنویس برای: $FOLDER_NAME"
+            yt-dlp --proxy "socks5://127.0.0.1:1080" \
+              --write-sub --sub-langs fa,en \
+              --sub-format vtt \
+              --skip-download \
+              --output "$SUBTITLE_DIR/%(title)s.%(ext)s" \
+              "$URL" 2>/dev/null || true
+            
+            if [ -n "$(find "$SUBTITLE_DIR" -name "*.vtt" 2>/dev/null)" ]; then
+              cd "$SUBTITLE_DIR" && zip -j "../subtitles.zip" *.vtt 2>/dev/null
+              rm -rf "$SUBTITLE_DIR"
+              echo "✅ زیرنویس ذخیره شد: $FOLDER_NAME"
+            else
+              rm -rf "$SUBTITLE_DIR"
+            fi
+          done < /tmp/downloaded.txt
+
+      - name: توقف WARP
+        if: always()
+        run: |
+          docker stop warp 2>/dev/null || true
+          docker rm warp 2>/dev/null || true
+
+      - name: آماده‌سازی برای آپلود (تقسیم فایل‌های بزرگ)
+        run: |
+          BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
+          
+          if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR")" ]; then
+            echo "⚠️ فایلی برای آپلود وجود ندارد"
+            exit 0
+          fi
+          
+          echo "🔍 بررسی مجدد فایل‌ها قبل از آپلود..."
+          
+          # تابع برای تبدیل فایل‌های بزرگ به zip چند قسمتی
+          process_large_files() {
+            local target_dir="$1"
+            
+            find "$target_dir" -type f -size +90M ! -name "*.zip" ! -name "*.z*" | while read -r large_file; do
+              FILE_SIZE=$(stat -c%s "$large_file")
+              FILE_SIZE_MB=$(echo "scale=2; $FILE_SIZE / 1048576" | bc)
+              FILE_DIR=$(dirname "$large_file")
+              FILE_NAME=$(basename "$large_file")
+              FILE_BASE="${FILE_NAME%.*}"
+              FILE_EXT="${FILE_NAME##*.}"
+              
+              echo "⚠️ فایل بزرگ شناسایی شد: $FILE_NAME (${FILE_SIZE_MB} MB)"
+              echo "📦 در حال تبدیل به zip با قطعات 70 مگابایتی..."
+              
+              cd "$FILE_DIR"
+              
+              # اگر رمز عبور وجود دارد
+              if [ -n "$PASSWORD" ]; then
+                zip -s 70m -P "$PASSWORD" "${FILE_BASE}.zip" "$FILE_NAME"
+              else
+                zip -s 70m "${FILE_BASE}.zip" "$FILE_NAME"
+              fi
+              
+              # حذف فایل اصلی بعد از موفقیت
+              if [ -f "${FILE_BASE}.zip" ]; then
+                rm -f "$FILE_NAME"
+                echo "✅ فایل به قطعات تقسیم شد: ${FILE_BASE}.zip, ${FILE_BASE}.z01, ..."
+              fi
+              
+              cd - > /dev/null
+            done
+          }
+          
+          export -f process_large_files
+          export PASSWORD="${{ github.event.inputs.password }}"
+          
+          process_large_files "$BACKUP_DIR"
+          
+          echo "✅ آماده‌سازی فایل‌ها کامل شد"
+
+      - name: ارسال به مخزن
+        run: |
+          BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
+          
+          if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR")" ]; then
+            echo "⚠️ فایلی برای آپلود وجود ندارد"
+            exit 0
+          fi
+          
+          git fetch origin
+          git reset --hard origin/${{ github.ref_name }} 2>/dev/null || true
+          
+          mkdir -p videos
+          cp -r "$BACKUP_DIR"/* videos/
+          
+          printf "# 📥 ویدیوهای دانلود شده\n\n" > videos/README.md
+          printf "| شماره | نام ویدیو | حجم | وضعیت |\n" >> videos/README.md
+          printf "|-------|-----------|------|--------|\n" >> videos/README.md
+          
+          COUNT=1
+          for folder in videos/*/; do
+            if [ -d "$folder" ]; then
+              NAME=$(basename "$folder")
+              
+              # محاسبه حجم کل فولدر
+              FOLDER_SIZE=$(du -sm "$folder" | cut -f1)
+              STATUS="✅"
+              
+              # بررسی وجود فایل‌های چندتکه
+              if ls "$folder"/*.z* 2>/dev/null | grep -q .; then
+                STATUS="📦 چندتکه (70MB)"
+              fi
+              
+              printf "| $COUNT | [$NAME](./$NAME/) | ${FOLDER_SIZE}MB | $STATUS |\n" >> videos/README.md
+              COUNT=$((COUNT + 1))
+            fi
+          done
+          
+          git add -f videos/
+          
+          if ! git diff --cached --quiet; then
+            git commit -m "🎬 دانلود خودکار ویدیو [skip ci]"
+            git push origin HEAD:${{ github.ref_name }} || true
+            echo "✅ فایل‌ها با موفقیت آپلود شدند"
+          else
+            echo "ℹ️ تغییر جدیدی برای ارسال وجود ندارد"
+          fi
+          
+          echo ""
+          echo "========================================="
+          echo "🎉 دانلود با موفقیت کامل شد!"
+          echo "📁 فایل‌ها در پوشه 'videos' ذخیره شدند"
+          echo ""
+          echo "📌 نکته: فایل‌های بزرگتر از 90MB به صورت خودکار"
+          echo "   به قطعات 70 مگابایتی zip تقسیم شده‌اند"
+          echo "   برای استخراج: cat file.zip.* > file.zip && unzip file.zip"
+          echo "========================================="
