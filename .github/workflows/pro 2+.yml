@@ -1,0 +1,310 @@
+name:  pro + دانلودر حرفه‌ای یوتیوب
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_urls:
+        description: '🔗 لینک ویدیو (لینک‌ها را با فاصله جدا کنید)'
+        required: true
+        type: string
+        default: ''
+      download_subtitles:
+        description: '📝 دانلود زیرنویس (فارسی و انگلیسی)'
+        required: false
+        default: false
+        type: boolean
+      quality:
+        description: '🎬 کیفیت ویدیو'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - audio
+      password:
+        description: '🔒 رمز فایل زیپ (اختیاری)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  download-youtube:
+    name: دانلود ویدیو از یوتیوب
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: دریافت کد مخزن
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: تنظیمات Git
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: راه اندازی WARP
+        run: |
+          echo "در حال راه اندازی کانتینر WARP..."
+          docker network create warp-net 2>/dev/null || true
+          docker run -d \
+            --name warp \
+            --restart=always \
+            --network warp-net \
+            -p 1080:1080 \
+            --cap-add NET_ADMIN \
+            --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+            --sysctl net.ipv4.conf.all.src_valid_mark=1 \
+            -v warp-data:/var/lib/cloudflare-warp \
+            caomingjun/warp
+          echo "در انتظار راه اندازی WARP (15 ثانیه)..."
+          sleep 15
+          for i in 1 2 3 4 5; do
+            RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
+            if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
+              echo "WARP با موفقیت فعال شد"
+              break
+            else
+              echo "تلاش $i/5 - WARP هنوز آماده نیست"
+              sleep 5
+            fi
+          done
+
+      - name: نصب پیش نیازها
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
+          curl -fsSL https://deno.land/install.sh | sh
+          export DENO_INSTALL="$HOME/.deno"
+          export PATH="$DENO_INSTALL/bin:$PATH"
+          echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
+          pip3 install --upgrade yt-dlp
+          yt-dlp --version
+
+      - name: پردازش لینک ها
+        id: process
+        run: |
+          echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | sort -u > urls.txt
+          COUNT=$(wc -l < urls.txt)
+          echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
+          echo "تعداد ویدیوها: $COUNT"
+          if [ $COUNT -eq 0 ]; then
+            echo "خطا: هیچ لینک معتبری یافت نشد"
+            exit 1
+          fi
+
+      - name: دانلود ویدیوها
+        id: download
+        env:
+          QUALITY: ${{ github.event.inputs.quality }}
+          PASSWORD: ${{ github.event.inputs.password }}
+          SUBTITLES: ${{ github.event.inputs.download_subtitles }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          sanitize_name() {
+            echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
+          }
+          
+          urlencode() {
+            python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+          }
+          
+          case "$QUALITY" in
+            audio) FORMAT="bestaudio/best" ;;
+            best) FORMAT="bestvideo+bestaudio/best" ;;
+            2160) FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
+            1440) FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
+            1080) FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
+            720) FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
+            480) FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
+            *) FORMAT="bestvideo+bestaudio/best" ;;
+          esac
+          
+          mkdir -p videos
+          SUCCESS=0
+          INDEX=0
+          TOTAL=$(wc -l < urls.txt)
+          echo "" > /tmp/video_info.txt
+          
+          while IFS= read -r URL; do
+            INDEX=$((INDEX + 1))
+            echo ""
+            echo "========================================="
+            echo "[$INDEX/$TOTAL] در حال دانلود: $URL"
+            echo "========================================="
+            
+            TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
+            if [ -z "$TITLE" ]; then
+              TITLE="video_$INDEX"
+            fi
+            SAFE_NAME=$(sanitize_name "$TITLE")
+            FOLDER="videos/${INDEX}_${SAFE_NAME}"
+            mkdir -p "$FOLDER"
+            
+            DOWNLOAD_OK=false
+            
+            echo "روش اندروید..."
+            if yt-dlp --proxy socks5://127.0.0.1:1080 \
+              -f "$FORMAT" \
+              --merge-output-format mp4 \
+              --extractor-args "youtube:player_client=android" \
+              --user-agent "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36" \
+              --no-check-certificates \
+              --sleep-requests 2 \
+              --sleep-interval 3 \
+              --retries 10 \
+              -o "$FOLDER/video.%(ext)s" \
+              "$URL"; then
+              DOWNLOAD_OK=true
+              echo "دانلود موفق بود"
+            fi
+            
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "روش وب کلاینت..."
+              if yt-dlp --proxy socks5://127.0.0.1:1080 \
+                -f "$FORMAT" \
+                --merge-output-format mp4 \
+                --extractor-args "youtube:player_client=web" \
+                --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                --no-check-certificates \
+                -o "$FOLDER/video.%(ext)s" \
+                "$URL"; then
+                DOWNLOAD_OK=true
+                echo "دانلود موفق بود"
+              fi
+            fi
+            
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "دانلود فقط صدا..."
+              if yt-dlp --proxy socks5://127.0.0.1:1080 \
+                -f "bestaudio" \
+                --extract-audio \
+                --audio-format mp3 \
+                -o "$FOLDER/audio.%(ext)s" \
+                "$URL"; then
+                DOWNLOAD_OK=true
+                echo "دانلود صدا موفق بود"
+              fi
+            fi
+            
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "همه روش ها ناموفق بودند: $URL"
+              rm -rf "$FOLDER"
+              continue
+            fi
+            
+            echo "Title: $TITLE" > "$FOLDER/info.txt"
+            echo "URL: $URL" >> "$FOLDER/info.txt"
+            echo "Quality: $QUALITY" >> "$FOLDER/info.txt"
+            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
+            
+            if [ "$SUBTITLES" = "true" ]; then
+              yt-dlp --proxy socks5://127.0.0.1:1080 \
+                --write-sub \
+                --sub-langs fa,en \
+                --sub-format vtt \
+                --skip-download \
+                -o "$FOLDER/subtitle.%(ext)s" \
+                "$URL" 2>/dev/null || true
+            fi
+            
+            echo "${INDEX}_${SAFE_NAME}|$URL" >> /tmp/video_info.txt
+            SUCCESS=$((SUCCESS + 1))
+            echo "دانلود شد: ${SAFE_NAME}"
+            
+          done < urls.txt
+          
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+      - name: تکه تکه کردن فایل های بزرگ و ساخت جدول دانلود
+        run: |
+          echo "در حال پردازش فایل ها و ساخت جدول دانلود..."
+          
+          SPLIT_SIZE=85m
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
+          HAS_PASSWORD="${{ github.event.inputs.password != '' }}"
+          PASSWORD="${{ github.event.inputs.password }}"
+          
+          # ساخت README اصلی
+          cat > videos/README.md << 'MASTEREOF'
+          # 📥 لیست ویدیوهای دانلود شده
+          
+          | شماره | نام ویدیو | کیفیت | حجم | لینک دانلود |
+          |-------|-----------|-------|------|--------------|
+          
+          MASTEREOF
+          
+          ROW_NUM=0
+          
+          for folder in videos/*/; do
+            if [ -d "$folder" ]; then
+              ROW_NUM=$((ROW_NUM + 1))
+              FOLDER_NAME=$(basename "$folder")
+              FOLDER_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FOLDER_NAME', safe=''))")
+              
+              # حذف شماره از ابتدای نام برای نمایش
+              DISPLAY_NAME=$(echo "$FOLDER_NAME" | sed 's/^[0-9]*_//')
+              
+              # پیدا کردن فایل ویدیویی
+              VIDEO_FILE=""
+              if [ -f "$folder/video.mp4" ]; then
+                VIDEO_FILE="$folder/video.mp4"
+                FILE_TYPE="mp4"
+              elif [ -f "$folder/audio.mp3" ]; then
+                VIDEO_FILE="$folder/audio.mp3"
+                FILE_TYPE="mp3"
+              fi
+              
+              if [ -n "$VIDEO_FILE" ] && [ -f "$VIDEO_FILE" ]; then
+                FILE_SIZE=$(stat -c%s "$VIDEO_FILE")
+                SIZE_MB=$(echo "scale=2; $FILE_SIZE / 1024 / 1024" | bc)
+                
+                if [ "$FILE_SIZE" -gt 90000000 ]; then
+                  echo "فایل ${SIZE_MB}MB بزرگ است - در حال تقسیم به قطعات..."
+                  
+                  cd "$folder"
+                  split -b $SPLIT_SIZE -d "$VIDEO_FILE" "part_"
+                  
+                  # ساخت جدول قطعات در README پوشه
+                  cat > README.md << 'PARTEOF'
+                  # قطعات فایل
+                  
+                  برای دانلود فایل، تمام قطعات زیر را دانلود کرده سپس合并 کنید.
+                  
+                  | قطعه | حجم | لینک دانلود |
+                  |------|------|--------------|
+                  
+                  PARTEOF
+                  
+                  PART_NUM=0
+                  for part in part_*; do
+                    PART_NUM=$((PART_NUM + 1))
+                    PART_SIZE=$(stat -c%s "$part")
+                    PART_SIZE_MB=$(echo "scale=2; $PART_SIZE / 1024 / 1024" | bc)
+                    PART_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$part', safe=''))")
+                    PART_LINK="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/videos/${FOLDER_ENCODED}/${PART_ENCODED}"
+                    echo "| $PART_NUM | ${PART_SIZE_MB} MB | [دانلود](${PART_LINK}) |" >> README.md
+                  done
+                  
+                  cat >> README.md << 'MERGEEOF'
+                  
+                  ## نحوه合并 قطعات
+                  
+                  **ویندوز:**
