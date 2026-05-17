@@ -96,7 +96,7 @@ unzip -P password file.zip
 ✅ راه حل: از لینک زیر استفاده کنید:
 
 text
-https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/files.html
+https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/download.html
 📊 ساختار پروژه
 text
 yt-dl/
