@@ -1,4 +1,4 @@
-name: YouTube Downloader Pro 🎬
+name: "YouTube Downloader Pro 🎬"
 
 on:
   workflow_dispatch:
@@ -19,13 +19,13 @@ on:
         default: 'best'
         type: choice
         options:
-          - best (بالاترین کیفیت)
-          - 2160p (4K)
-          - 1440p (2K)
-          - 1080p (Full HD)
-          - 720p (HD)
-          - 480p (SD)
-          - audio (فقط صدا)
+          - 'best (بالاترین کیفیت)'
+          - '2160p (4K)'
+          - '1440p (2K)'
+          - '1080p (Full HD)'
+          - '720p (HD)'
+          - '480p (SD)'
+          - 'audio (فقط صدا)'
       password:
         description: '🔒 رمز فایل زیپ (اختیاری)'
         required: false
@@ -39,29 +39,28 @@ on:
 
 jobs:
   download-youtube:
-    name: 📥 دانلود ویدیو از یوتیوب
+    name: "📥 دانلود ویدیو از یوتیوب"
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
       contents: write
     env:
-      # رفع خطای Node.js 20 به 24
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       PYTHONUNBUFFERED: 1
 
     steps:
-      - name: 🚀 دریافت کد مخزن
+      - name: "🚀 دریافت کد مخزن"
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1  # بهینه: فقط آخرین commit
+          fetch-depth: 1
 
-      - name: ⚙️ تنظیمات Git
+      - name: "⚙️ تنظیمات Git"
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: 🌐 راه‌اندازی WARP (پروکسی)
+      - name: "🌐 راه‌اندازی WARP (پروکسی)"
         run: |
           docker run -d \
             --name warp-proxy \
@@ -72,16 +71,15 @@ jobs:
           echo "⏳ Waiting for WARP to initialize..."
           sleep 10
 
-      - name: 📦 نصب پیش‌نیازها
+      - name: "📦 نصب پیش‌نیازها"
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq
           pip3 install --upgrade yt-dlp
 
-      - name: 🔍 پردازش لینک‌ها
+      - name: "🔍 پردازش لینک‌ها"
         id: process
         run: |
-          # پشتیبانی از جداکننده‌های مختلف
           echo "${{ github.event.inputs.video_urls }}" | \
             sed 's/[،,、+ ]/\n/g' | \
             grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | \
@@ -91,7 +89,7 @@ jobs:
           echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
           echo "✅ تعداد ویدیوها: $COUNT"
 
-      - name: 📥 دانلود ویدیوها
+      - name: "📥 دانلود ویدیوها"
         id: download
         env:
           QUALITY: ${{ github.event.inputs.quality }}
@@ -105,12 +103,12 @@ jobs:
           
           # تنظیم کیفیت
           case "$QUALITY" in
-            "audio") FORMAT="bestaudio/best" ;;
-            "2160p") FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
-            "1440p") FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
-            "1080p") FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
-            "720p")  FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
-            "480p")  FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
+            *audio*) FORMAT="bestaudio/best" ;;
+            *2160p*) FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
+            *1440p*) FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
+            *1080p*) FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
+            *720p*)  FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
+            *480p*)  FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
             *)       FORMAT="bestvideo+bestaudio/best" ;;
           esac
           
@@ -140,33 +138,40 @@ jobs:
             
             # دریافت اطلاعات ویدیو
             TITLE=$(yt-dlp $YT_OPTS --get-title "$URL" 2>/dev/null | head -1)
-            [ -z "$TITLE" ] && TITLE="video_$INDEX"
+            if [ -z "$TITLE" ]; then
+              TITLE="video_$INDEX"
+            fi
             SAFE_NAME=$(sanitize "$TITLE")
             FOLDER="downloads/${INDEX}_${SAFE_NAME}"
             mkdir -p "$FOLDER"
             
             # دانلود ویدیو
-            if [ "$QUALITY" = "audio" ]; then
-              yt-dlp $YT_OPTS \
+            DOWNLOAD_OK=false
+            if echo "$QUALITY" | grep -q "audio"; then
+              if yt-dlp $YT_OPTS \
                 -f "$FORMAT" \
                 --extract-audio \
                 --audio-format mp3 \
                 --audio-quality 0 \
                 -o "$FOLDER/audio.%(ext)s" \
-                "$URL" && DOWNLOAD_OK=true || DOWNLOAD_OK=false
+                "$URL"; then
+                DOWNLOAD_OK=true
+              fi
             else
-              yt-dlp $YT_OPTS \
+              if yt-dlp $YT_OPTS \
                 -f "$FORMAT" \
                 --merge-output-format mp4 \
                 --write-thumbnail \
                 --convert-thumbnails jpg \
                 -o "$FOLDER/video.%(ext)s" \
-                "$URL" && DOWNLOAD_OK=true || DOWNLOAD_OK=false
+                "$URL"; then
+                DOWNLOAD_OK=true
+              fi
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
               echo "❌ دانلود ناموفق: $URL"
-              FAILED="${FAILED}\n$URL"
+              FAILED="${FAILED}${URL}\n"
               rm -rf "$FOLDER"
               continue
             fi
@@ -182,21 +187,23 @@ jobs:
                 "$URL" 2>/dev/null || true
               
               # فشرده‌سازی زیرنویس‌ها
-              if [ -n "$(find "$FOLDER" -name "*.vtt" -o -name "*.srt" 2>/dev/null)" ]; then
+              if find "$FOLDER" -type f \( -name "*.vtt" -o -name "*.srt" \) | grep -q .; then
                 cd "$FOLDER" && zip -j subtitles.zip *.vtt *.srt 2>/dev/null || true
+                cd ../..
               fi
             fi
             
             # ایجاد فایل توضیحات
-            cat > "$FOLDER/info.txt" << EOF
+            cat > "$FOLDER/info.txt" << INFOEOF
 عنوان: $TITLE
 لینک: $URL
 کیفیت: ${QUALITY:-best}
 تاریخ: $(date '+%Y-%m-%d %H:%M:%S')
-EOF
+INFOEOF
             
             # فشرده‌سازی نهایی (اختیاری)
-            if [ "${{ github.event.inputs.create_archive }}" = "true" ]; then
+            CREATE_ARCHIVE="${{ github.event.inputs.create_archive }}"
+            if [ "$CREATE_ARCHIVE" = "true" ]; then
               if [ -n "$PASSWORD" ]; then
                 zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
                 rm -rf "$FOLDER"
@@ -214,36 +221,39 @@ EOF
           # ذخیره گزارش
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "failed<<EOF" >> $GITHUB_OUTPUT
+          
+          # ذخیره لیست ناموفق‌ها
+          echo "failed<<GITEOF" >> $GITHUB_OUTPUT
           echo -e "$FAILED" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "GITEOF" >> $GITHUB_OUTPUT
 
-      - name: 🛑 توقف WARP
+      - name: "🛑 توقف WARP"
         if: always()
         run: |
           docker stop warp-proxy 2>/dev/null || true
           docker rm warp-proxy 2>/dev/null || true
 
-      - name: 📤 ارسال به مخزن
+      - name: "📤 ارسال به مخزن"
         if: success() && steps.download.outputs.success > 0
         run: |
           git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
           
           # ایجاد README
-          cat > downloads/README.md << 'EOF'
-# 📥 ویدیوهای دانلود شده
-
-> این فایل‌ها به صورت خودکار توسط GitHub Actions دانلود شده‌اند
-
-| # | ویدیو | وضعیت |
-|---|-------|--------|
-EOF
+          echo "# 📥 ویدیوهای دانلود شده" > downloads/README.md
+          echo "" >> downloads/README.md
+          echo "> این فایل‌ها به صورت خودکار توسط GitHub Actions دانلود شده‌اند" >> downloads/README.md
+          echo "" >> downloads/README.md
+          echo "| # | ویدیو | وضعیت |" >> downloads/README.md
+          echo "|---|-------|--------|" >> downloads/README.md
           
           COUNT=1
           for item in downloads/*.zip downloads/*/; do
             if [ -e "$item" ]; then
               NAME=$(basename "$item" .zip)
               NAME=$(basename "$NAME" | cut -d'_' -f2-)
+              if [ -z "$NAME" ]; then
+                NAME="ویدیو $COUNT"
+              fi
               echo "| $COUNT | $NAME | ✅ |" >> downloads/README.md
               COUNT=$((COUNT + 1))
             fi
@@ -254,10 +264,14 @@ EOF
           echo "📊 **آمار:** ${{ steps.download.outputs.success }} ویدیو با موفقیت دانلود شد" >> downloads/README.md
           
           git add downloads/ 2>/dev/null || true
-          git commit -m "✨ دانلود خودکار: ${{ steps.download.outputs.success }} ویدیو [skip ci]" || echo "ℹ️ تغییری برای commit وجود ندارد"
-          git push origin HEAD:${{ github.ref_name }} || echo "⚠️ خطا در ارسال به مخزن"
+          if git diff --cached --quiet; then
+            echo "ℹ️ تغییری برای commit وجود ندارد"
+          else
+            git commit -m "✨ دانلود خودکار: ${{ steps.download.outputs.success }} ویدیو [skip ci]"
+            git push origin HEAD:${{ github.ref_name }} || echo "⚠️ خطا در ارسال به مخزن"
+          fi
 
-      - name: 📊 گزارش نهایی
+      - name: "📊 گزارش نهایی"
         if: always()
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -265,8 +279,9 @@ EOF
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ موفق: ${{ steps.download.outputs.success }}"
           echo "📊 مجموع: ${{ steps.download.outputs.total }}"
-          if [ -n "${{ steps.download.outputs.failed }}" ]; then
+          FAILED_VALUES="${{ steps.download.outputs.failed }}"
+          if [ -n "$FAILED_VALUES" ]; then
             echo "❌ ناموفق:"
-            echo "${{ steps.download.outputs.failed }}"
+            echo "$FAILED_VALUES"
           fi
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
