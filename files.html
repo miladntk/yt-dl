@@ -56,6 +56,15 @@
             padding: 10px;
             border: 2px solid #e0e0e0;
             border-radius: 10px;
+            font-size: 1em;
+        }
+        .refresh-btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
         }
         .table-container {
             padding: 30px;
@@ -84,29 +93,23 @@
             text-decoration: none;
             border-radius: 5px;
             font-size: 0.9em;
+            margin: 0 5px;
         }
         .download-folder-btn {
             background: #ff9800;
         }
         .github-link {
-            display: inline-block;
-            padding: 8px 15px;
             background: #24292e;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
         }
-        .alert {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            color: #856404;
-            padding: 15px;
-            margin: 20px;
-            border-radius: 10px;
+        .loading, .error {
             text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
         }
+        .error { color: #f44336; }
         @media (max-width: 768px) {
             th, td { font-size: 0.8em; padding: 8px; }
+            .download-btn { padding: 5px 10px; font-size: 0.75em; }
         }
     </style>
 </head>
@@ -117,81 +120,101 @@
             <p>برای دانلود روی دکمه‌های سبز و نارنجی کلیک کنید</p>
         </div>
         
-        <div class="alert">
-            💡 <strong>نحوه دانلود فایل‌ها:</strong><br>
-            • <strong>دانلود مستقیم:</strong> روی دکمه سبز "دانلود فایل" کلیک کنید<br>
-            • <strong>دانلود پوشه:</strong> روی دکمه نارنجی "مشاهده در GitHub" کلیک کنید سپس فایل مورد نظر را دانلود کنید<br>
-            • برای دانلود پوشه، می‌توانید از <a href="https://download-directory.github.io/" target="_blank">Download Directory</a> استفاده کنید
+        <div class="stats" id="stats">
+            <div class="stat-card"><h3 id="totalCount">0</h3><p>تعداد کل</p></div>
+            <div class="stat-card"><h3 id="folderCount">0</h3><p>پوشه‌ها</p></div>
+            <div class="stat-card"><h3 id="fileCount">0</h3><p>فایل‌ها</p></div>
+            <div class="stat-card"><h3 id="totalSize">0</h3><p>حجم کل</p></div>
         </div>
-        
-        <div class="stats" id="stats"></div>
         
         <div class="controls">
             <input type="text" class="search-box" id="searchBox" placeholder="🔍 جستجوی فایل‌ها..." onkeyup="filterTable()">
+            <button class="refresh-btn" onclick="loadFiles()">🔄 بروزرسانی</button>
         </div>
         
         <div class="table-container">
             <table id="fileTable">
                 <thead>
-                    <tr><th>نوع</th><th>نام</th><th>حجم</th><th>تاریخ</th><th>عملیات</th></tr>
+                    <tr><th>نوع</th><th>نام</th><th>حجم</th><th>عملیات</th></tr>
                 </thead>
                 <tbody id="fileTableBody">
-                    <!-- داده‌ها توسط اسکریپت پر می‌شوند -->
+                    <tr><td colspan="4" class="loading">⏳ در حال بارگذاری فایل‌ها...</td></tr>
                 </tbody>
             </table>
         </div>
     </div>
     
     <script>
-        // داده‌های فایل‌ها از GitHub API
+        // دریافت نام مخزن از آدرس صفحه
+        const repoPath = window.location.pathname.split('/');
+        const owner = repoPath[1] || 'miladntk';
+        const repo = repoPath[2] || 'yt-dl';
+        
         async function loadFiles() {
+            const tbody = document.getElementById('fileTableBody');
+            tbody.innerHTML = '<tr><td colspan="4" class="loading">⏳ در حال بارگذاری فایل‌ها...</td></tr>';
+            
             try {
-                const repoPath = window.location.pathname.split('/');
-                const owner = repoPath[1];
-                const repo = repoPath[2];
-                const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/videos`;
-                
+                // استفاده از API گیت‌هاب با افزودن پارامتر time برای جلوگیری از کش
+                const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/videos?t=${Date.now()}`;
                 const response = await fetch(apiUrl);
-                const files = await response.json();
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const files = await response.json();
                 displayFiles(files);
-                updateStats(files);
+                
             } catch (error) {
-                document.getElementById('fileTableBody').innerHTML = 
-                    '<tr><td colspan="5" style="text-align:center">❌ خطا در بارگذاری فایل‌ها. لطفا صفحه را refresh کنید.</td></tr>';
+                console.error('Error:', error);
+                tbody.innerHTML = `<tr><td colspan="4" class="error">❌ خطا در بارگذاری فایل‌ها: ${error.message}<br><br>
+                    🔍 راهکار: اگر مخزن شما خصوصی است یا فایل‌ها وجود ندارند، این پیام نمایش داده می‌شود.
+                    <br><br>
+                    <a href="https://github.com/${owner}/${repo}/tree/main/videos" target="_blank" style="color:#667eea">📁 مشاهده مستقیم پوشه videos در GitHub</a>
+                </td></tr>`;
             }
         }
         
         function displayFiles(files) {
             const tbody = document.getElementById('fileTableBody');
+            let folders = 0;
+            let fileItems = 0;
             let totalSize = 0;
+            
+            if (!files || files.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">📂 پوشه videos خالی است. ابتدا ویدیویی دانلود کنید.</td></tr>';
+                updateStats(0, 0, 0);
+                return;
+            }
             
             const rows = files.map(file => {
                 if (file.type === 'dir') {
-                    totalSize += 0;
+                    folders++;
                     return `
                         <tr>
-                            <td>📁</td>
-                            <td>${escapeHtml(file.name)}</td>
-                            <td>پوشه</td>
-                            <td>${new Date().toLocaleDateString('fa-IR')}</td>
+                            <td>📁 پوشه</td>
+                            <td><strong>${escapeHtml(file.name)}</strong></td>
+                            <td>-</td>
                             <td>
                                 <a href="${file.html_url}" target="_blank" class="download-btn download-folder-btn">📂 مشاهده در GitHub</a>
+                                <a href="https://download-directory.github.io/?url=https://github.com/${owner}/${repo}/tree/main/${file.path}" target="_blank" class="download-btn github-link">📥 دانلود پوشه</a>
                             </td>
                         </tr>
                     `;
                 } else {
+                    fileItems++;
                     totalSize += file.size;
                     const sizeText = formatFileSize(file.size);
-                    const date = new Date(file.commit?.committer?.date || Date.now()).toLocaleDateString('fa-IR');
+                    const icon = getFileIcon(file.name);
                     return `
                         <tr>
-                            <td>${getFileIcon(file.name)}</td>
+                            <td>${icon} فایل</td>
                             <td>${escapeHtml(file.name)}</td>
                             <td>${sizeText}</td>
-                            <td>${date}</td>
                             <td>
-                                <a href="${file.download_url}" class="download-btn" download>⬇️ دانلود فایل</a>
+                                <a href="${file.download_url}" class="download-btn" download>⬇️ دانلود مستقیم</a>
+                                <a href="${file.html_url}" target="_blank" class="download-btn github-link">🔗 مشاهده در GitHub</a>
                             </td>
                         </tr>
                     `;
@@ -199,26 +222,24 @@
             }).join('');
             
             tbody.innerHTML = rows;
+            updateStats(files.length, folders, fileItems, totalSize);
         }
         
-        function updateStats(files) {
-            const folders = files.filter(f => f.type === 'dir').length;
-            const filesCount = files.filter(f => f.type === 'file').length;
-            let totalSize = files.filter(f => f.type === 'file').reduce((sum, f) => sum + f.size, 0);
-            
-            const statsHtml = `
-                <div class="stat-card"><h3>${folders + filesCount}</h3><p>تعداد کل</p></div>
-                <div class="stat-card"><h3>${folders}</h3><p>پوشه‌ها</p></div>
-                <div class="stat-card"><h3>${filesCount}</h3><p>فایل‌ها</p></div>
-                <div class="stat-card"><h3>${formatFileSize(totalSize)}</h3><p>حجم کل</p></div>
-            `;
-            document.getElementById('stats').innerHTML = statsHtml;
+        function updateStats(total, folders, files, size) {
+            document.getElementById('totalCount').textContent = total;
+            document.getElementById('folderCount').textContent = folders;
+            document.getElementById('fileCount').textContent = files;
+            document.getElementById('totalSize').textContent = formatFileSize(size);
         }
         
         function getFileIcon(filename) {
             if (filename.endsWith('.mp4')) return '🎬';
+            if (filename.endsWith('.mkv')) return '🎥';
             if (filename.endsWith('.zip')) return '📦';
+            if (filename.endsWith('.rar')) return '🗜️';
+            if (filename.match(/\.z[0-9]+$/)) return '🧩';
             if (filename.endsWith('.jpg') || filename.endsWith('.png')) return '🖼️';
+            if (filename.endsWith('.srt') || filename.endsWith('.vtt')) return '📝';
             return '📄';
         }
         
@@ -244,6 +265,7 @@
             });
         }
         
+        // بارگذاری خودکار هنگام باز شدن صفحه
         loadFiles();
     </script>
 </body>
