@@ -87,11 +87,6 @@
             width: auto;
         }
         
-        .token-input {
-            direction: ltr;
-            font-family: monospace;
-        }
-        
         button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -123,11 +118,6 @@
             padding: 20px;
             margin-top: 20px;
         }
-        .run-id {
-            font-family: monospace;
-            color: #667eea;
-            word-break: break-all;
-        }
         .log-output {
             background: #1e1e1e;
             color: #d4d4d4;
@@ -143,6 +133,7 @@
         .success { color: #4caf50; }
         .error { color: #f44336; }
         .running { color: #ff9800; }
+        .warning { background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
         
         .links {
             display: flex;
@@ -170,6 +161,11 @@
             </div>
             
             <div class="form-section">
+                <div class="warning">
+                    ⚠️ <strong>نکته مهم:</strong> برای استفاده از این صفحه، باید در حساب گیت‌هاب خود <strong>لاگین</strong> باشید.
+                    همچنین صفحه باید از دامنه <strong>github.com</strong> باز شود.
+                </div>
+                
                 <div class="form-group">
                     <label>🔗 لینک ویدیو (لینک‌ها را با کاما یا فاصله جدا کنید)</label>
                     <textarea id="videoUrls" placeholder="https://youtube.com/watch?v=...&#10;https://youtu.be/...&#10;https://youtube.com/playlist?list=..."></textarea>
@@ -200,15 +196,6 @@
                     <input type="text" id="password" placeholder="در صورت نیاز رمز وارد کنید">
                 </div>
                 
-                <div class="form-group">
-                    <label>🔑 توکن گیت‌هاب (برای اجرای اکشن)</label>
-                    <input type="password" id="githubToken" class="token-input" placeholder="ghp_xxxxxxxxxxxx" dir="ltr">
-                    <small style="color:#666; display:block; margin-top:5px;">
-                        👉 <a href="https://github.com/settings/tokens" target="_blank">ایجاد توکن جدید</a> 
-                        (نیاز به دسترسی: repo, workflow)
-                    </small>
-                </div>
-                
                 <button id="runBtn" onclick="triggerWorkflow()">🚀 شروع دانلود</button>
             </div>
             
@@ -233,6 +220,7 @@
     <script>
         const owner = 'miladntk';
         const repo = 'yt-dl';
+        let workflowId = null;
         let currentRunId = null;
         let pollingInterval = null;
         
@@ -244,7 +232,6 @@
             });
         });
         
-        // تابع برای دریافت لینک‌ها
         function getSelectedQuality() {
             const selected = document.querySelector('.quality-btn.selected');
             return selected ? selected.dataset.quality : '1080';
@@ -255,18 +242,37 @@
             return urls.split(/[,\n\s]+/).filter(u => u.trim() && u.includes('youtu'));
         }
         
-        // تابع برای اجرای workflow از طریق API
+        // دریافت workflow ID به صورت خودکار
+        async function getWorkflowId() {
+            try {
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows`, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                // پیدا کردن workflow دانلود
+                const workflow = data.workflows?.find(w => 
+                    w.name.includes('YouTube') || 
+                    w.path.includes('youtube-downloader') ||
+                    w.name.includes('Download')
+                );
+                
+                if (workflow) {
+                    return workflow.id;
+                }
+                throw new Error('Workflow یافت نشد');
+            } catch (error) {
+                console.error('Error getting workflow:', error);
+                throw error;
+            }
+        }
+        
+        // اجرای workflow
         async function triggerWorkflow() {
-            const token = document.getElementById('githubToken').value;
             const urls = getVideoUrls();
             const quality = getSelectedQuality();
             const subtitles = document.getElementById('downloadSubtitles').checked;
             const password = document.getElementById('password').value;
-            
-            if (!token) {
-                alert('❌ لطفاً توکن گیت‌هاب را وارد کنید');
-                return;
-            }
             
             if (urls.length === 0) {
                 alert('❌ لطفاً حداقل یک لینک یوتیوب وارد کنید');
@@ -277,41 +283,27 @@
             runBtn.disabled = true;
             runBtn.textContent = '⏳ در حال اجرا...';
             
-            // آماده سازی وضعیت نمایش
             const statusContainer = document.getElementById('statusContainer');
             statusContainer.innerHTML = `
                 <div class="run-status">
-                    <p><strong>🔄 در حال اجرا...</strong></p>
-                    <p>لینک‌ها: ${urls.length} ویدیو</p>
-                    <p>کیفیت: ${quality}</p>
-                    <p>زیرنویس: ${subtitles ? 'بله' : 'خیر'}</p>
+                    <p><strong>🔄 در حال آماده‌سازی...</strong></p>
                     <div class="log-output" id="logOutput">در حال اتصال به GitHub API...</div>
                 </div>
             `;
             
             try {
-                // 1. دریافت workflow ID
-                const workflowResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const workflows = await workflowResponse.json();
-                
-                // پیدا کردن workflow دانلود
-                const downloadWorkflow = workflows.workflows?.find(w => 
-                    w.name.includes('YouTube') || w.path.includes('youtube-downloader')
-                );
-                
-                if (!downloadWorkflow) {
-                    throw new Error('Workflow دانلود یافت نشد');
+                // دریافت workflow ID اگر نداریم
+                if (!workflowId) {
+                    workflowId = await getWorkflowId();
                 }
                 
-                // 2. اجرای workflow
-                const triggerResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${downloadWorkflow.id}/dispatches`, {
+                // اجرای workflow بدون توکن - فقط با کوکی مرورگر
+                const triggerResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflowId}/dispatches`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
                     },
+                    credentials: 'include', // این خط مهم است! کوکی مرورگر را می‌فرستد
                     body: JSON.stringify({
                         ref: 'main',
                         inputs: {
@@ -324,20 +316,27 @@
                 });
                 
                 if (!triggerResponse.ok) {
-                    throw new Error(`خطا ${triggerResponse.status}: ${triggerResponse.statusText}`);
+                    let errorMsg = `خطا ${triggerResponse.status}`;
+                    if (triggerResponse.status === 401) {
+                        errorMsg = 'لطفاً در گیت‌هاب لاگین کنید';
+                    } else if (triggerResponse.status === 403) {
+                        errorMsg = 'شما دسترسی اجرای اکشن را ندارید';
+                    }
+                    throw new Error(errorMsg);
                 }
                 
-                // 3. دریافت آخرین run
+                // منتظر بمانیم تا اجرا شروع شود
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 
+                // دریافت آخرین run
                 const runsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=1`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    credentials: 'include'
                 });
                 const runs = await runsResponse.json();
                 
                 if (runs.workflow_runs && runs.workflow_runs.length > 0) {
                     currentRunId = runs.workflow_runs[0].id;
-                    startPolling(token);
+                    startPolling();
                 }
                 
             } catch (error) {
@@ -345,7 +344,12 @@
                 statusContainer.innerHTML = `
                     <div class="run-status">
                         <p class="error">❌ خطا: ${error.message}</p>
-                        <p>لطفاً توکن خود را بررسی کنید و دوباره تلاش کنید.</p>
+                        <p>لطفاً مطمئن شوید:</p>
+                        <ul>
+                            <li>در گیت‌هاب <strong>لاگین</strong> هستید</li>
+                            <li>صفحه را از دامنه <strong>github.com</strong> باز کرده‌اید</li>
+                            <li>دسترسی نوشتن در این مخزن را دارید</li>
+                        </ul>
                     </div>
                 `;
                 runBtn.disabled = false;
@@ -353,60 +357,34 @@
             }
         }
         
-        // تابع برای دریافت وضعیت اجرا
-        async function getRunStatus(token) {
+        // دریافت وضعیت اجرا
+        async function getRunStatus() {
             if (!currentRunId) return;
             
             try {
                 const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${currentRunId}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    credentials: 'include'
                 });
                 const run = await response.json();
-                
-                // دریافت لاگ‌ها
-                const logsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${currentRunId}/logs`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
                 
                 const statusContainer = document.getElementById('statusContainer');
                 const statusText = {
                     'queued': '⏳ در صف انتظار',
                     'in_progress': '🔄 در حال اجرا',
                     'completed': '✅ تکمیل شده',
-                    'action_required': '⚠️ نیاز به اقدام',
-                    'cancelled': '❌ لغو شده',
                     'failure': '❌ ناموفق',
                     'success': '✅ موفق'
                 };
                 
-                const conclusionText = run.conclusion ? {
-                    'success': '✅ موفق',
-                    'failure': '❌ ناموفق',
-                    'cancelled': '❌ لغو شده',
-                    'skipped': '⏭️ رد شده'
-                } : {};
-                
-                let logHtml = '<div class="log-output" id="logOutput">';
-                if (logsResponse.ok) {
-                    const logs = await logsResponse.text();
-                    const lastLines = logs.split('\n').slice(-30).join('\n');
-                    logHtml += `<pre style="margin:0; color:#d4d4d4;">${escapeHtml(lastLines)}</pre>`;
-                } else {
-                    logHtml += '<p>لاگ در حال آماده‌سازی...</p>';
-                }
-                logHtml += '</div>';
-                
                 statusContainer.innerHTML = `
                     <div class="run-status">
                         <p><strong>📋 وضعیت:</strong> <span class="${run.status === 'completed' ? (run.conclusion === 'success' ? 'success' : 'error') : 'running'}">
-                            ${statusText[run.status] || run.status} ${conclusionText[run.conclusion] || ''}
+                            ${statusText[run.status] || run.status} ${run.conclusion === 'success' ? '✅ موفق' : (run.conclusion === 'failure' ? '❌ ناموفق' : '')}
                         </span></p>
-                        <p><strong>🆔 Run ID:</strong> <span class="run-id">${run.id}</span></p>
+                        <p><strong>🆔 شناسه:</strong> ${run.id}</p>
                         <p><strong>🕐 شروع:</strong> ${run.created_at ? new Date(run.created_at).toLocaleString('fa-IR') : '-'}</p>
-                        <p><strong>⏱️ پایان:</strong> ${run.updated_at ? new Date(run.updated_at).toLocaleString('fa-IR') : '-'}</p>
                         ${run.conclusion === 'success' ? 
                             `<p class="success">✅ دانلود با موفقیت انجام شد! <a href="download.html" target="_blank">مشاهده ویدیوها</a></p>` : ''}
-                        ${logHtml}
                         <div class="links">
                             <a href="https://github.com/${owner}/${repo}/actions/runs/${run.id}" target="_blank">🔗 مشاهده در GitHub</a>
                             <a href="download.html" target="_blank">📂 صفحه مدیریت ویدیوها</a>
@@ -414,7 +392,6 @@
                     </div>
                 `;
                 
-                // اگر اجرا تمام شد، poll را متوقف کن
                 if (run.status === 'completed') {
                     stopPolling();
                     document.getElementById('runBtn').disabled = false;
@@ -426,10 +403,10 @@
             }
         }
         
-        function startPolling(token) {
+        function startPolling() {
             if (pollingInterval) clearInterval(pollingInterval);
-            getRunStatus(token);
-            pollingInterval = setInterval(() => getRunStatus(token), 5000);
+            getRunStatus();
+            pollingInterval = setInterval(() => getRunStatus(), 5000);
         }
         
         function stopPolling() {
@@ -438,24 +415,6 @@
                 pollingInterval = null;
             }
         }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        // بررسی خودکار توکن در localStorage
-        const savedToken = localStorage.getItem('github_token');
-        if (savedToken) {
-            document.getElementById('githubToken').value = savedToken;
-        }
-        
-        document.getElementById('githubToken').addEventListener('change', (e) => {
-            if (e.target.value) {
-                localStorage.setItem('github_token', e.target.value);
-            }
-        });
     </script>
 </body>
 </html>
