@@ -4,19 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: لینک ویدیو (لینک ها را با کاما یا خط جدید جدا کنید)
+        description: 'لینک ویدیو (لینک ها را با کاما یا خط جدید جدا کنید)'
         required: true
         type: string
         default: ''
       download_subtitles:
-        description: دانلود زیرنویس (فارسی و انگلیسی)
+        description: 'دانلود زیرنویس (فارسی و انگلیسی)'
         required: false
         default: false
         type: boolean
       quality:
-        description: کیفیت ویدیو
+        description: 'کیفیت ویدیو'
         required: false
-        default: best
+        default: 'best'
         type: choice
         options:
           - best
@@ -27,12 +27,12 @@ on:
           - 480
           - audio
       password:
-        description: رمز فایل زیپ (اختیاری)
+        description: 'رمز فایل زیپ (اختیاری)'
         required: false
         default: ''
         type: string
       create_archive:
-        description: ایجاد فایل نهایی فشرده
+        description: 'ایجاد فایل نهایی فشرده'
         required: false
         default: true
         type: boolean
@@ -121,7 +121,7 @@ jobs:
           
           mkdir -p downloads
           SUCCESS=0
-          FAILED=""
+          FAILED_LIST=""
           INDEX=0
           TOTAL=$(wc -l < urls.txt)
           
@@ -165,7 +165,7 @@ jobs:
             
             if [ "$DOWNLOAD_OK" = false ]; then
               echo "Download failed: $URL"
-              FAILED="${FAILED}${URL}\n"
+              FAILED_LIST="$FAILED_LIST $URL"
               rm -rf "$FOLDER"
               continue
             fi
@@ -173,24 +173,24 @@ jobs:
             if [ "$SUBTITLES" = "true" ]; then
               yt-dlp $YT_OPTS \
                 --write-sub \
-                --sub-langs fa,en,en-orig,en-US \
-                --sub-format vtt/srt \
+                --sub-langs fa,en \
+                --sub-format vtt \
                 --skip-download \
                 -o "$FOLDER/subtitle.%(ext)s" \
                 "$URL" 2>/dev/null || true
               
-              if find "$FOLDER" -type f \( -name "*.vtt" -o -name "*.srt" \) | grep -q .; then
-                cd "$FOLDER" && zip -j subtitles.zip *.vtt *.srt 2>/dev/null || true
-                cd ../..
+              cd "$FOLDER" || true
+              if ls *.vtt 2>/dev/null 1>/dev/null; then
+                zip -j subtitles.zip *.vtt 2>/dev/null || true
+                rm -f *.vtt
               fi
+              cd ../..
             fi
             
-            cat > "$FOLDER/info.txt" << INFOEOF
-Title: $TITLE
-URL: $URL
-Quality: ${QUALITY:-best}
-Date: $(date '+%Y-%m-%d %H:%M:%S')
-INFOEOF
+            echo "Title: $TITLE" > "$FOLDER/info.txt"
+            echo "URL: $URL" >> "$FOLDER/info.txt"
+            echo "Quality: ${QUALITY:-best}" >> "$FOLDER/info.txt"
+            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
             
             CREATE_ARCHIVE="${{ github.event.inputs.create_archive }}"
             if [ "$CREATE_ARCHIVE" = "true" ]; then
@@ -210,10 +210,7 @@ INFOEOF
           
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          
-          echo "failed<<GITEOF" >> $GITHUB_OUTPUT
-          echo -e "$FAILED" >> $GITHUB_OUTPUT
-          echo "GITEOF" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED_LIST" >> $GITHUB_OUTPUT
 
       - name: Stop WARP
         if: always()
@@ -268,7 +265,6 @@ INFOEOF
           echo "Total: ${{ steps.download.outputs.total }}"
           FAILED_VALUES="${{ steps.download.outputs.failed }}"
           if [ -n "$FAILED_VALUES" ]; then
-            echo "Failed:"
-            echo "$FAILED_VALUES"
+            echo "Failed URLs: $FAILED_VALUES"
           fi
           echo "==========================================="
