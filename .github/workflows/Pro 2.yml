@@ -1,20 +1,20 @@
-name: YouTube Downloader Pro 2
+name: دانلودر حرفه‌ای یوتیوب
 
 on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: 'لینک ویدیو (لینک ها را با فاصله جدا کنید)'
+        description: '🔗 لینک ویدیو (لینک‌ها را با فاصله جدا کنید)'
         required: true
         type: string
         default: ''
       download_subtitles:
-        description: 'دانلود زیرنویس (فارسی و انگلیسی)'
+        description: '📝 دانلود زیرنویس (فارسی و انگلیسی)'
         required: false
         default: false
         type: boolean
       quality:
-        description: 'کیفیت ویدیو'
+        description: '🎬 کیفیت ویدیو'
         required: false
         default: 'best'
         type: choice
@@ -27,14 +27,14 @@ on:
           - 480
           - audio
       password:
-        description: 'رمز فایل زیپ (اختیاری)'
+        description: '🔒 رمز فایل زیپ (اختیاری)'
         required: false
         default: ''
         type: string
 
 jobs:
   download-youtube:
-    name: Download YouTube Videos
+    name: "📥 دانلود ویدیو از یوتیوب"
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -43,21 +43,21 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: Checkout repository
+      - name: "📂 دریافت کد مخزن"
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: "⚙️ تنظیمات Git"
         run: |
           git config --global http.postBuffer 524288000
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Start WARP Container
+      - name: "🌐 راه‌اندازی WARP (پروکسی)"
         run: |
-          echo "Starting Cloudflare WARP container..."
+          echo "در حال راه‌اندازی کانتینر WARP..."
           docker network create warp-net 2>/dev/null || true
           docker run -d \
             --name warp \
@@ -69,22 +69,22 @@ jobs:
             --sysctl net.ipv4.conf.all.src_valid_mark=1 \
             -v warp-data:/var/lib/cloudflare-warp \
             caomingjun/warp
-          echo "Waiting for WARP to initialize (15 seconds)..."
+          echo "در انتظار راه‌اندازی WARP (15 ثانیه)..."
           sleep 15
-          echo "Testing WARP connection..."
+          echo "در حال تست اتصال WARP..."
           for i in 1 2 3 4 5; do
             RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
             if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
-              echo "WARP is active!"
+              echo "✅ WARP با موفقیت فعال شد!"
               echo "$RESULT"
               break
             else
-              echo "Attempt $i/5 - WARP not ready yet, waiting..."
+              echo "تلاش $i/5 - WARP هنوز آماده نیست، در حال انتظار..."
               sleep 5
             fi
           done
 
-      - name: Install Dependencies
+      - name: "📦 نصب پیش‌نیازها"
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
@@ -95,19 +95,21 @@ jobs:
           pip3 install --upgrade yt-dlp
           yt-dlp --version
 
-      - name: Process URLs
+      - name: "🔍 پردازش لینک‌ها"
         id: process
         run: |
           echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | sort -u > urls.txt
           COUNT=$(wc -l < urls.txt)
           echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
-          echo "Total videos: $COUNT"
+          echo "========================================="
+          echo "📊 تعداد ویدیوها: $COUNT"
+          echo "========================================="
           if [ $COUNT -eq 0 ]; then
-            echo "ERROR: No valid URLs found!"
+            echo "❌ خطا: هیچ لینک معتبری یافت نشد!"
             exit 1
           fi
 
-      - name: Download Videos (with age-restricted support)
+      - name: "📥 دانلود ویدیوها (با پشتیبانی از محدودیت سنی)"
         id: download
         env:
           QUALITY: ${{ github.event.inputs.quality }}
@@ -137,9 +139,9 @@ jobs:
           while IFS= read -r URL; do
             INDEX=$((INDEX + 1))
             echo ""
-            echo "==========================================="
-            echo "[$INDEX/$TOTAL] Downloading: $URL"
-            echo "==========================================="
+            echo "========================================="
+            echo "🎬 [$INDEX/$TOTAL] در حال دانلود: $URL"
+            echo "========================================="
             
             TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
             if [ -z "$TITLE" ]; then
@@ -151,8 +153,7 @@ jobs:
             
             DOWNLOAD_OK=false
             
-            # روش مخصوص ویدیوهای دارای محدودیت سنی (مانند ویدیوی سیاسی)
-            echo "Trying age-restricted video method (Android client)..."
+            echo "📡 روش اندروید (مناسب ویدیوهای دارای محدودیت)..."
             if yt-dlp --proxy socks5://127.0.0.1:1080 \
               -f "$FORMAT" \
               --merge-output-format mp4 \
@@ -167,12 +168,11 @@ jobs:
               -o "$FOLDER/video.%(ext)s" \
               "$URL"; then
               DOWNLOAD_OK=true
-              echo "Success with Android client method"
+              echo "✅ دانلود با روش اندروید موفق بود"
             fi
             
-            # روش دوم: Web client با user-agent معمولی
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Trying web client method..."
+              echo "📡 روش وب کلاینت..."
               if yt-dlp --proxy socks5://127.0.0.1:1080 \
                 -f "$FORMAT" \
                 --merge-output-format mp4 \
@@ -182,27 +182,12 @@ jobs:
                 -o "$FOLDER/video.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
-                echo "Success with web client method"
+                echo "✅ دانلود با روش وب کلاینت موفق بود"
               fi
             fi
             
-            # روش سوم: بدون proxy (فقط برای تست)
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Trying without proxy..."
-              if yt-dlp \
-                -f "best" \
-                --extractor-args "youtube:player_client=android" \
-                --user-agent "Mozilla/5.0 (Linux; Android 13)" \
-                -o "$FOLDER/video.%(ext)s" \
-                "$URL"; then
-                DOWNLOAD_OK=true
-                echo "Success without proxy"
-              fi
-            fi
-            
-            # روش چهارم: دانلود فقط صدا (اگر ویدیو دانلود نشد)
-            if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Trying audio only..."
+              echo "📡 دانلود فقط صدا..."
               if yt-dlp --proxy socks5://127.0.0.1:1080 \
                 -f "bestaudio" \
                 --extract-audio \
@@ -211,12 +196,12 @@ jobs:
                 -o "$FOLDER/audio.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
-                echo "Success with audio only"
+                echo "✅ دانلود صدا موفق بود"
               fi
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "All methods failed for: $URL"
+              echo "❌ همه روش‌ها برای این لینک ناموفق بودند: $URL"
               rm -rf "$FOLDER"
               continue
             fi
@@ -227,7 +212,7 @@ jobs:
             echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
             
             if [ "$SUBTITLES" = "true" ]; then
-              echo "Downloading subtitles..."
+              echo "📝 در حال دانلود زیرنویس..."
               yt-dlp --proxy socks5://127.0.0.1:1080 \
                 --write-sub \
                 --sub-langs fa,en \
@@ -238,53 +223,109 @@ jobs:
                 "$URL" 2>/dev/null || true
             fi
             
-            if [ -n "$PASSWORD" ]; then
-              zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
-              rm -rf "$FOLDER"
-            fi
-            
             SUCCESS=$((SUCCESS + 1))
-            echo "Downloaded: ${SAFE_NAME}"
+            echo "✅ دانلود شد: ${SAFE_NAME}"
             
           done < urls.txt
           
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
 
-      - name: Stop WARP Container
+      - name: "✂️ تکه‌تکه کردن فایل‌های بزرگ (زیر 90 مگابایت)"
+        run: |
+          echo "========================================="
+          echo "✂️ در حال تکه‌تکه کردن فایل‌های بزرگ..."
+          echo "========================================="
+          
+          SPLIT_SIZE=85m
+          cd videos
+          
+          for folder in */; do
+            if [ -d "$folder" ]; then
+              cd "$folder"
+              
+              # پیدا کردن فایل ویدیویی
+              VIDEO_FILE=$(ls video.mp4 2>/dev/null | head -1)
+              if [ -n "$VIDEO_FILE" ] && [ -f "$VIDEO_FILE" ]; then
+                FILE_SIZE=$(stat -c%s "$VIDEO_FILE" 2>/dev/null || echo "0")
+                SIZE_MB=$((FILE_SIZE / 1024 / 1024))
+                
+                if [ "$FILE_SIZE" -gt 90000000 ]; then
+                  echo "📦 فایل ${SIZE_MB}MB است - نیاز به تکه‌تکه شدن دارد"
+                  
+                  # تکه‌تکه کردن فایل
+                  split -b $SPLIT_SIZE -d "$VIDEO_FILE" "part_"
+                  
+                  # ایجاد فایل دستورالعمل合并
+                  cat > "merge_instructions.txt" << 'MERGEEOF'
+برای合并 فایل‌ها در ویندوز:
+copy /b part_00 + part_01 + part_02 + part_03 output.mp4
+
+برای合并 در لینوکس/مک:
+cat part_* > output.mp4
+MERGEEOF
+                  
+                  # حذف فایل اصلی
+                  rm -f "$VIDEO_FILE"
+                  
+                  # شمارش قطعات
+                  PART_COUNT=$(ls part_* 2>/dev/null | wc -l)
+                  echo "✅ فایل به $PART_COUNT قطعه تقسیم شد"
+                else
+                  echo "✅ فایل ${SIZE_MB}MB است - نیازی به تکه‌تکه شدن ندارد"
+                fi
+              fi
+              
+              cd ..
+            fi
+          done
+          
+          cd ..
+
+      - name: "📦 فشرده‌سازی نهایی (اختیاری)"
+        if: github.event.inputs.password != ''
+        run: |
+          echo "========================================="
+          echo "🔒 در حال فشرده‌سازی با رمز..."
+          echo "========================================="
+          
+          PASSWORD="${{ github.event.inputs.password }}"
+          
+          for folder in videos/*/; do
+            if [ -d "$folder" ]; then
+              cd "$folder"
+              FOLDER_NAME=$(basename "$folder")
+              zip -r -P "$PASSWORD" "../${FOLDER_NAME}.zip" .
+              cd ..
+              rm -rf "$folder"
+            fi
+          done
+
+      - name: "🛑 توقف WARP"
         if: always()
         run: |
           docker stop warp 2>/dev/null || true
           docker rm warp 2>/dev/null || true
 
-      - name: Commit and Push
-        if: steps.download.outputs.success > 0
+      - name: "📤 ارسال به مخزن (با مدیریت فایل‌های بزرگ)"
         run: |
-          git add videos/
-          if ! git diff --cached --quiet; then
-            git commit -m "Downloaded ${{ steps.download.outputs.success }} videos [skip ci]"
-            git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
-            git push origin HEAD:${{ github.ref_name }}
-          fi
-          echo "Files saved in videos/ folder"
+          echo "========================================="
+          echo "📤 در حال ارسال فایل‌ها به مخزن..."
+          echo "========================================="
+          
+          git fetch origin
+          git reset --hard origin/${{ github.ref_name }} 2>/dev/null || true
+          
+          # ایجاد README اصلی
+          cat > videos/README.md << 'EOF'
+# 📥 ویدیوهای دانلود شده
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: downloaded-videos
-          path: videos/
-          retention-days: 7
+این فایل‌ها به صورت خودکار توسط GitHub Actions دانلود شده‌اند.
 
-      - name: Final Report
-        run: |
-          echo "==========================================="
-          echo "Final Download Report"
-          echo "==========================================="
-          echo "Success: ${{ steps.download.outputs.success }}"
-          echo "Total: ${{ steps.download.outputs.total }}"
-          echo "==========================================="
-          echo ""
-          echo "If some videos failed to download, they may have age restrictions."
-          echo "Check the artifacts for any partial downloads."
-          echo "==========================================="
+## 📊 راهنمای合并 فایل‌های تکه‌تکه شده
+
+اگر فایل به چند قطعه تقسیم شده است:
+
+### ویندوز:
+```cmd
+copy /b part_00 + part_01 + part_02 output.mp4
