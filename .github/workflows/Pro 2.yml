@@ -244,7 +244,6 @@ jobs:
             if [ -d "$folder" ]; then
               cd "$folder"
               
-              # پیدا کردن فایل ویدیویی
               VIDEO_FILE=$(ls video.mp4 2>/dev/null | head -1)
               if [ -n "$VIDEO_FILE" ] && [ -f "$VIDEO_FILE" ]; then
                 FILE_SIZE=$(stat -c%s "$VIDEO_FILE" 2>/dev/null || echo "0")
@@ -253,10 +252,8 @@ jobs:
                 if [ "$FILE_SIZE" -gt 90000000 ]; then
                   echo "📦 فایل ${SIZE_MB}MB است - نیاز به تکه‌تکه شدن دارد"
                   
-                  # تکه‌تکه کردن فایل
                   split -b $SPLIT_SIZE -d "$VIDEO_FILE" "part_"
                   
-                  # ایجاد فایل دستورالعمل合并
                   cat > "merge_instructions.txt" << 'MERGEEOF'
 برای合并 فایل‌ها در ویندوز:
 copy /b part_00 + part_01 + part_02 + part_03 output.mp4
@@ -265,10 +262,8 @@ copy /b part_00 + part_01 + part_02 + part_03 output.mp4
 cat part_* > output.mp4
 MERGEEOF
                   
-                  # حذف فایل اصلی
                   rm -f "$VIDEO_FILE"
                   
-                  # شمارش قطعات
                   PART_COUNT=$(ls part_* 2>/dev/null | wc -l)
                   echo "✅ فایل به $PART_COUNT قطعه تقسیم شد"
                 else
@@ -307,7 +302,7 @@ MERGEEOF
           docker stop warp 2>/dev/null || true
           docker rm warp 2>/dev/null || true
 
-      - name: "📤 ارسال به مخزن (با مدیریت فایل‌های بزرگ)"
+      - name: "📤 ارسال به مخزن"
         run: |
           echo "========================================="
           echo "📤 در حال ارسال فایل‌ها به مخزن..."
@@ -316,7 +311,6 @@ MERGEEOF
           git fetch origin
           git reset --hard origin/${{ github.ref_name }} 2>/dev/null || true
           
-          # ایجاد README اصلی
           cat > videos/README.md << 'EOF'
 # 📥 ویدیوهای دانلود شده
 
@@ -327,5 +321,45 @@ MERGEEOF
 اگر فایل به چند قطعه تقسیم شده است:
 
 ### ویندوز:
-```cmd
 copy /b part_00 + part_01 + part_02 output.mp4
+
+### لینوکس/مک:
+cat part_* > output.mp4
+
+---
+📅 تاریخ دانلود: $(date '+%Y-%m-%d %H:%M:%S')
+EOF
+          
+          git add videos/ 2>/dev/null || true
+          
+          if git diff --cached --quiet; then
+            echo "ℹ️ تغییر جدیدی برای ارسال وجود ندارد"
+          else
+            git commit -m "📥 دانلود خودکار ویدیوها [skip ci]"
+            
+            if ! git push origin HEAD:${{ github.ref_name }} 2>&1; then
+              echo "⚠️ خطا در ارسال به مخزن - فایل‌ها در Artifacts ذخیره شدند"
+            fi
+          fi
+
+      - name: "📦 آپلود آرتیفکت (پشتیبان)"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: downloaded-videos-backup
+          path: videos/
+          retention-days: 7
+
+      - name: "📊 گزارش نهایی"
+        run: |
+          echo "========================================="
+          echo "📊 گزارش نهایی دانلود"
+          echo "========================================="
+          echo "✅ موفق: ${{ steps.download.outputs.success }}"
+          echo "📊 مجموع: ${{ steps.download.outputs.total }}"
+          echo "========================================="
+          echo ""
+          echo "📁 فایل‌ها در پوشه 'videos' ذخیره شدند"
+          echo "📥 در صورت موفقیت در push، در مخزن قابل مشاهده است"
+          echo "📦 در غیر این صورت، از بخش Actions آرتیفکت را دانلود کنید"
+          echo "========================================="
