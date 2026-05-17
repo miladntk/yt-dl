@@ -1,0 +1,290 @@
+name: YouTube Downloader Pro 2
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_urls:
+        description: 'لینک ویدیو (لینک ها را با فاصله جدا کنید)'
+        required: true
+        type: string
+        default: ''
+      download_subtitles:
+        description: 'دانلود زیرنویس (فارسی و انگلیسی)'
+        required: false
+        default: false
+        type: boolean
+      quality:
+        description: 'کیفیت ویدیو'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - audio
+      password:
+        description: 'رمز فایل زیپ (اختیاری)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  download-youtube:
+    name: Download YouTube Videos
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Start WARP Container
+        run: |
+          echo "Starting Cloudflare WARP container..."
+          docker network create warp-net 2>/dev/null || true
+          docker run -d \
+            --name warp \
+            --restart=always \
+            --network warp-net \
+            -p 1080:1080 \
+            --cap-add NET_ADMIN \
+            --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+            --sysctl net.ipv4.conf.all.src_valid_mark=1 \
+            -v warp-data:/var/lib/cloudflare-warp \
+            caomingjun/warp
+          echo "Waiting for WARP to initialize (15 seconds)..."
+          sleep 15
+          echo "Testing WARP connection..."
+          for i in 1 2 3 4 5; do
+            RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
+            if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
+              echo "WARP is active!"
+              echo "$RESULT"
+              break
+            else
+              echo "Attempt $i/5 - WARP not ready yet, waiting..."
+              sleep 5
+            fi
+          done
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq bc
+          curl -fsSL https://deno.land/install.sh | sh
+          export DENO_INSTALL="$HOME/.deno"
+          export PATH="$DENO_INSTALL/bin:$PATH"
+          echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
+          pip3 install --upgrade yt-dlp
+          yt-dlp --version
+
+      - name: Process URLs
+        id: process
+        run: |
+          echo "${{ github.event.inputs.video_urls }}" | tr ' ' '\n' | grep -E '^(https?://)?(www\.)?(youtube\.com|youtu\.be)/' | sort -u > urls.txt
+          COUNT=$(wc -l < urls.txt)
+          echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
+          echo "Total videos: $COUNT"
+          if [ $COUNT -eq 0 ]; then
+            echo "ERROR: No valid URLs found!"
+            exit 1
+          fi
+
+      - name: Download Videos (with age-restricted support)
+        id: download
+        env:
+          QUALITY: ${{ github.event.inputs.quality }}
+          PASSWORD: ${{ github.event.inputs.password }}
+          SUBTITLES: ${{ github.event.inputs.download_subtitles }}
+        run: |
+          sanitize_name() {
+            echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/ /-/g' | tr -s '-'
+          }
+          
+          case "$QUALITY" in
+            audio) FORMAT="bestaudio/best" ;;
+            best) FORMAT="bestvideo+bestaudio/best" ;;
+            2160) FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
+            1440) FORMAT="bestvideo[height<=1440]+bestaudio/best[height<=1440]" ;;
+            1080) FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
+            720) FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
+            480) FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
+            *) FORMAT="bestvideo+bestaudio/best" ;;
+          esac
+          
+          mkdir -p videos
+          SUCCESS=0
+          INDEX=0
+          TOTAL=$(wc -l < urls.txt)
+          
+          while IFS= read -r URL; do
+            INDEX=$((INDEX + 1))
+            echo ""
+            echo "==========================================="
+            echo "[$INDEX/$TOTAL] Downloading: $URL"
+            echo "==========================================="
+            
+            TITLE=$(yt-dlp --proxy socks5://127.0.0.1:1080 --get-title "$URL" 2>/dev/null | head -1)
+            if [ -z "$TITLE" ]; then
+              TITLE="video_$INDEX"
+            fi
+            SAFE_NAME=$(sanitize_name "$TITLE")
+            FOLDER="videos/${INDEX}_${SAFE_NAME}"
+            mkdir -p "$FOLDER"
+            
+            DOWNLOAD_OK=false
+            
+            # روش مخصوص ویدیوهای دارای محدودیت سنی (مانند ویدیوی سیاسی)
+            echo "Trying age-restricted video method (Android client)..."
+            if yt-dlp --proxy socks5://127.0.0.1:1080 \
+              -f "$FORMAT" \
+              --merge-output-format mp4 \
+              --extractor-args "youtube:player_client=android" \
+              --user-agent "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36" \
+              --no-check-certificates \
+              --sleep-requests 2 \
+              --sleep-interval 3 \
+              --max-sleep-interval 10 \
+              --limit-rate 5M \
+              --retries 10 \
+              -o "$FOLDER/video.%(ext)s" \
+              "$URL"; then
+              DOWNLOAD_OK=true
+              echo "Success with Android client method"
+            fi
+            
+            # روش دوم: Web client با user-agent معمولی
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "Trying web client method..."
+              if yt-dlp --proxy socks5://127.0.0.1:1080 \
+                -f "$FORMAT" \
+                --merge-output-format mp4 \
+                --extractor-args "youtube:player_client=web" \
+                --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                --no-check-certificates \
+                -o "$FOLDER/video.%(ext)s" \
+                "$URL"; then
+                DOWNLOAD_OK=true
+                echo "Success with web client method"
+              fi
+            fi
+            
+            # روش سوم: بدون proxy (فقط برای تست)
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "Trying without proxy..."
+              if yt-dlp \
+                -f "best" \
+                --extractor-args "youtube:player_client=android" \
+                --user-agent "Mozilla/5.0 (Linux; Android 13)" \
+                -o "$FOLDER/video.%(ext)s" \
+                "$URL"; then
+                DOWNLOAD_OK=true
+                echo "Success without proxy"
+              fi
+            fi
+            
+            # روش چهارم: دانلود فقط صدا (اگر ویدیو دانلود نشد)
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "Trying audio only..."
+              if yt-dlp --proxy socks5://127.0.0.1:1080 \
+                -f "bestaudio" \
+                --extract-audio \
+                --audio-format mp3 \
+                --extractor-args "youtube:player_client=android" \
+                -o "$FOLDER/audio.%(ext)s" \
+                "$URL"; then
+                DOWNLOAD_OK=true
+                echo "Success with audio only"
+              fi
+            fi
+            
+            if [ "$DOWNLOAD_OK" = false ]; then
+              echo "All methods failed for: $URL"
+              rm -rf "$FOLDER"
+              continue
+            fi
+            
+            echo "Title: $TITLE" > "$FOLDER/info.txt"
+            echo "URL: $URL" >> "$FOLDER/info.txt"
+            echo "Quality: $QUALITY" >> "$FOLDER/info.txt"
+            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
+            
+            if [ "$SUBTITLES" = "true" ]; then
+              echo "Downloading subtitles..."
+              yt-dlp --proxy socks5://127.0.0.1:1080 \
+                --write-sub \
+                --sub-langs fa,en \
+                --sub-format vtt \
+                --skip-download \
+                --extractor-args "youtube:player_client=android" \
+                -o "$FOLDER/subtitle.%(ext)s" \
+                "$URL" 2>/dev/null || true
+            fi
+            
+            if [ -n "$PASSWORD" ]; then
+              zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
+              rm -rf "$FOLDER"
+            fi
+            
+            SUCCESS=$((SUCCESS + 1))
+            echo "Downloaded: ${SAFE_NAME}"
+            
+          done < urls.txt
+          
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+      - name: Stop WARP Container
+        if: always()
+        run: |
+          docker stop warp 2>/dev/null || true
+          docker rm warp 2>/dev/null || true
+
+      - name: Commit and Push
+        if: steps.download.outputs.success > 0
+        run: |
+          git add videos/
+          if ! git diff --cached --quiet; then
+            git commit -m "Downloaded ${{ steps.download.outputs.success }} videos [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+          echo "Files saved in videos/ folder"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: downloaded-videos
+          path: videos/
+          retention-days: 7
+
+      - name: Final Report
+        run: |
+          echo "==========================================="
+          echo "Final Download Report"
+          echo "==========================================="
+          echo "Success: ${{ steps.download.outputs.success }}"
+          echo "Total: ${{ steps.download.outputs.total }}"
+          echo "==========================================="
+          echo ""
+          echo "If some videos failed to download, they may have age restrictions."
+          echo "Check the artifacts for any partial downloads."
+          echo "==========================================="
