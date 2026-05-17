@@ -1,4 +1,0 @@
-برای合并 فایل ها در ویندوز:
-copy /b part_00 + part_01 + part_02 output.mp4
-برای合并 در لینوکس/مک:
-cat part_* > output.mp4
