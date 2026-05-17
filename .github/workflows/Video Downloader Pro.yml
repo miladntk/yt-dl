@@ -44,6 +44,8 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
@@ -74,6 +76,10 @@ jobs:
           COUNT=$(wc -l < urls.txt)
           echo "total_urls=$COUNT" >> $GITHUB_OUTPUT
           echo "Total videos: $COUNT"
+          
+          # نمایش لینک‌ها برای دیباگ
+          echo "URLs to download:"
+          cat urls.txt
 
       - name: Download videos
         id: download
@@ -105,7 +111,8 @@ jobs:
             --limit-rate 10M \
             --no-mtime"
           
-          mkdir -p downloads
+          # ایجاد پوشه videos در ریشه مخزن
+          mkdir -p videos
           SUCCESS=0
           FAILED_LIST=""
           INDEX=0
@@ -123,7 +130,7 @@ jobs:
               TITLE="video_$INDEX"
             fi
             SAFE_NAME=$(sanitize "$TITLE")
-            FOLDER="downloads/${INDEX}_${SAFE_NAME}"
+            FOLDER="videos/${INDEX}_${SAFE_NAME}"
             mkdir -p "$FOLDER"
             
             DOWNLOAD_OK=false
@@ -197,43 +204,107 @@ jobs:
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "failed=$FAILED_LIST" >> $GITHUB_OUTPUT
-
-      - name: Push to repository
-        if: success() && steps.download.outputs.success > 0
-        run: |
-          git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
           
-          echo "# Downloaded Videos" > downloads/README.md
-          echo "" >> downloads/README.md
-          echo "These files were automatically downloaded by GitHub Actions" >> downloads/README.md
-          echo "" >> downloads/README.md
-          echo "| # | Video | Status |" >> downloads/README.md
-          echo "|---|-------|--------|" >> downloads/README.md
+          # نمایش محتوای پوشه videos برای دیباگ
+          echo ""
+          echo "==========================================="
+          echo "Contents of videos folder:"
+          echo "==========================================="
+          ls -la videos/
+          echo ""
+          echo "Files in videos folder:"
+          find videos -type f -name "*.mp4" -o -name "*.mp3" -o -name "*.zip" 2>/dev/null
+
+      - name: Create README
+        if: steps.download.outputs.success > 0
+        run: |
+          echo "# Downloaded Videos" > videos/README.md
+          echo "" >> videos/README.md
+          echo "These files were automatically downloaded by GitHub Actions" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "Download Date: $(date '+%Y-%m-%d %H:%M:%S')" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "## Video List" >> videos/README.md
+          echo "" >> videos/README.md
+          echo "| # | Video Name | Type |" >> videos/README.md
+          echo "|---|------------|------|" >> videos/README.md
           
           COUNT=1
-          for item in downloads/*.zip downloads/*/; do
-            if [ -e "$item" ]; then
-              NAME=$(basename "$item" .zip)
+          # لیست کردن فایل‌های zip
+          for zipfile in videos/*.zip; do
+            if [ -f "$zipfile" ]; then
+              NAME=$(basename "$zipfile" .zip)
               NAME=$(basename "$NAME" | cut -d'_' -f2-)
-              if [ -z "$NAME" ]; then
-                NAME="Video $COUNT"
-              fi
-              echo "| $COUNT | $NAME | Done |" >> downloads/README.md
+              echo "| $COUNT | $NAME | ZIP Archive |" >> videos/README.md
               COUNT=$((COUNT + 1))
             fi
           done
           
-          echo "" >> downloads/README.md
-          echo "---" >> downloads/README.md
-          echo "**Stats:** ${{ steps.download.outputs.success }} videos downloaded successfully" >> downloads/README.md
+          # لیست کردن پوشه‌ها
+          for folder in videos/*/; do
+            if [ -d "$folder" ] && [ "$folder" != "videos//" ]; then
+              NAME=$(basename "$folder")
+              NAME=$(echo "$NAME" | cut -d'_' -f2-)
+              # بررسی نوع فایل در پوشه
+              if [ -f "${folder}/video.mp4" ]; then
+                TYPE="Video MP4"
+              elif [ -f "${folder}/audio.mp3" ]; then
+                TYPE="Audio MP3"
+              else
+                TYPE="Folder"
+              fi
+              echo "| $COUNT | $NAME | $TYPE |" >> videos/README.md
+              COUNT=$((COUNT + 1))
+            fi
+          done
           
-          git add downloads/ 2>/dev/null || true
+          echo "" >> videos/README.md
+          echo "---" >> videos/README.md
+          echo "**Stats:** ${{ steps.download.outputs.success }} videos downloaded successfully" >> videos/README.md
+          
+          echo "README created successfully"
+          cat videos/README.md
+
+      - name: Commit and push videos
+        if: steps.download.outputs.success > 0
+        run: |
+          # بررسی وجود فایل برای commit
+          if [ ! -d "videos" ] || [ -z "$(ls -A videos 2>/dev/null)" ]; then
+            echo "No files to commit"
+            exit 0
+          fi
+          
+          echo "Files to commit:"
+          ls -la videos/
+          
+          # اضافه کردن فایل‌ها به git
+          git add videos/
+          
+          # بررسی تغییرات
           if git diff --cached --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "Auto-download: ${{ steps.download.outputs.success }} videos [skip ci]"
-            git push origin HEAD:${{ github.ref_name }} || echo "Failed to push"
+            exit 0
           fi
+          
+          # commit و push با force
+          git commit -m "Add downloaded videos: ${{ steps.download.outputs.success }} items [skip ci]"
+          
+          # دریافت آخرین تغییرات قبل از push
+          git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
+          
+          # push با force در صورت نیاز
+          git push origin HEAD:${{ github.ref_name }} --force-with-lease || \
+          git push origin HEAD:${{ github.ref_name }} --force
+          
+          echo "Successfully pushed to repository"
+
+      - name: Upload artifacts (backup)
+        if: steps.download.outputs.success > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-videos
+          path: videos/
+          retention-days: 7
 
       - name: Final report
         if: always()
@@ -247,4 +318,8 @@ jobs:
           if [ -n "$FAILED_VALUES" ]; then
             echo "Failed URLs: $FAILED_VALUES"
           fi
+          echo "==========================================="
+          echo ""
+          echo "📍 Files saved in: videos/ folder"
+          echo "📦 Artifacts also available in Actions tab"
           echo "==========================================="
