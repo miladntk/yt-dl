@@ -1,0 +1,287 @@
+name: Generate File Listing Page
+
+on:
+  push:
+    paths:
+      - 'videos/**'
+  workflow_dispatch:
+    inputs:
+      manual_update:
+        description: 'بروزرسانی دستی صفحه'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  generate-page:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Generate file listing HTML
+        run: |
+          cat > files.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="fa" dir="rtl">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>مدیریت ویدیوها - YouTube Downloader</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      min-height: 100vh;
+                      padding: 20px;
+                  }
+                  .container {
+                      max-width: 1400px;
+                      margin: 0 auto;
+                      background: white;
+                      border-radius: 20px;
+                      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                      overflow: hidden;
+                  }
+                  .header {
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      padding: 30px;
+                      text-align: center;
+                  }
+                  .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+                  .stats {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                      gap: 20px;
+                      padding: 30px;
+                      background: #f8f9fa;
+                  }
+                  .stat-card {
+                      text-align: center;
+                      padding: 20px;
+                      background: white;
+                      border-radius: 10px;
+                      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                  }
+                  .stat-card h3 {
+                      color: #667eea;
+                      font-size: 2em;
+                  }
+                  .controls {
+                      padding: 20px 30px;
+                      display: flex;
+                      gap: 15px;
+                      flex-wrap: wrap;
+                  }
+                  .search-box {
+                      flex: 1;
+                      padding: 10px;
+                      border: 2px solid #e0e0e0;
+                      border-radius: 10px;
+                  }
+                  .table-container {
+                      padding: 30px;
+                      overflow-x: auto;
+                  }
+                  table {
+                      width: 100%;
+                      border-collapse: collapse;
+                  }
+                  th {
+                      background: #667eea;
+                      color: white;
+                      padding: 15px;
+                      text-align: right;
+                  }
+                  td {
+                      padding: 15px;
+                      border-bottom: 1px solid #e0e0e0;
+                  }
+                  tr:hover { background: #f8f9fa; }
+                  .download-btn {
+                      display: inline-block;
+                      padding: 8px 15px;
+                      background: #4caf50;
+                      color: white;
+                      text-decoration: none;
+                      border-radius: 5px;
+                      font-size: 0.9em;
+                  }
+                  .download-folder-btn {
+                      background: #ff9800;
+                  }
+                  .github-link {
+                      display: inline-block;
+                      padding: 8px 15px;
+                      background: #24292e;
+                      color: white;
+                      text-decoration: none;
+                      border-radius: 5px;
+                  }
+                  .alert {
+                      background: #fff3cd;
+                      border: 1px solid #ffc107;
+                      color: #856404;
+                      padding: 15px;
+                      margin: 20px;
+                      border-radius: 10px;
+                      text-align: center;
+                  }
+                  @media (max-width: 768px) {
+                      th, td { font-size: 0.8em; padding: 8px; }
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <h1>📥 لیست ویدیوهای دانلود شده</h1>
+                      <p>برای دانلود روی دکمه‌های سبز و نارنجی کلیک کنید</p>
+                  </div>
+                  
+                  <div class="alert">
+                      💡 <strong>نحوه دانلود فایل‌ها:</strong><br>
+                      • <strong>دانلود مستقیم:</strong> روی دکمه سبز "دانلود فایل" کلیک کنید<br>
+                      • <strong>دانلود پوشه:</strong> روی دکمه نارنجی "مشاهده در GitHub" کلیک کنید سپس فایل مورد نظر را دانلود کنید<br>
+                      • برای دانلود پوشه، می‌توانید از <a href="https://download-directory.github.io/" target="_blank">Download Directory</a> استفاده کنید
+                  </div>
+                  
+                  <div class="stats" id="stats"></div>
+                  
+                  <div class="controls">
+                      <input type="text" class="search-box" id="searchBox" placeholder="🔍 جستجوی فایل‌ها..." onkeyup="filterTable()">
+                  </div>
+                  
+                  <div class="table-container">
+                      <table id="fileTable">
+                          <thead>
+                              <tr><th>نوع</th><th>نام</th><th>حجم</th><th>تاریخ</th><th>عملیات</th></tr>
+                          </thead>
+                          <tbody id="fileTableBody">
+                              <!-- داده‌ها توسط اسکریپت پر می‌شوند -->
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+              
+              <script>
+                  // داده‌های فایل‌ها از GitHub API
+                  async function loadFiles() {
+                      try {
+                          const repoPath = window.location.pathname.split('/');
+                          const owner = repoPath[1];
+                          const repo = repoPath[2];
+                          const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/videos`;
+                          
+                          const response = await fetch(apiUrl);
+                          const files = await response.json();
+                          
+                          displayFiles(files);
+                          updateStats(files);
+                      } catch (error) {
+                          document.getElementById('fileTableBody').innerHTML = 
+                              '<tr><td colspan="5" style="text-align:center">❌ خطا در بارگذاری فایل‌ها. لطفا صفحه را refresh کنید.</td></tr>';
+                      }
+                  }
+                  
+                  function displayFiles(files) {
+                      const tbody = document.getElementById('fileTableBody');
+                      let totalSize = 0;
+                      
+                      const rows = files.map(file => {
+                          if (file.type === 'dir') {
+                              totalSize += 0;
+                              return `
+                                  <tr>
+                                      <td>📁</td>
+                                      <td>${escapeHtml(file.name)}</td>
+                                      <td>پوشه</td>
+                                      <td>${new Date().toLocaleDateString('fa-IR')}</td>
+                                      <td>
+                                          <a href="${file.html_url}" target="_blank" class="download-btn download-folder-btn">📂 مشاهده در GitHub</a>
+                                      </td>
+                                  </tr>
+                              `;
+                          } else {
+                              totalSize += file.size;
+                              const sizeText = formatFileSize(file.size);
+                              const date = new Date(file.commit?.committer?.date || Date.now()).toLocaleDateString('fa-IR');
+                              return `
+                                  <tr>
+                                      <td>${getFileIcon(file.name)}</td>
+                                      <td>${escapeHtml(file.name)}</td>
+                                      <td>${sizeText}</td>
+                                      <td>${date}</td>
+                                      <td>
+                                          <a href="${file.download_url}" class="download-btn" download>⬇️ دانلود فایل</a>
+                                      </td>
+                                  </tr>
+                              `;
+                          }
+                      }).join('');
+                      
+                      tbody.innerHTML = rows;
+                  }
+                  
+                  function updateStats(files) {
+                      const folders = files.filter(f => f.type === 'dir').length;
+                      const filesCount = files.filter(f => f.type === 'file').length;
+                      let totalSize = files.filter(f => f.type === 'file').reduce((sum, f) => sum + f.size, 0);
+                      
+                      const statsHtml = `
+                          <div class="stat-card"><h3>${folders + filesCount}</h3><p>تعداد کل</p></div>
+                          <div class="stat-card"><h3>${folders}</h3><p>پوشه‌ها</p></div>
+                          <div class="stat-card"><h3>${filesCount}</h3><p>فایل‌ها</p></div>
+                          <div class="stat-card"><h3>${formatFileSize(totalSize)}</h3><p>حجم کل</p></div>
+                      `;
+                      document.getElementById('stats').innerHTML = statsHtml;
+                  }
+                  
+                  function getFileIcon(filename) {
+                      if (filename.endsWith('.mp4')) return '🎬';
+                      if (filename.endsWith('.zip')) return '📦';
+                      if (filename.endsWith('.jpg') || filename.endsWith('.png')) return '🖼️';
+                      return '📄';
+                  }
+                  
+                  function formatFileSize(bytes) {
+                      if (bytes === 0) return '0 B';
+                      const sizes = ['B', 'KB', 'MB', 'GB'];
+                      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+                      return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
+                  }
+                  
+                  function escapeHtml(text) {
+                      const div = document.createElement('div');
+                      div.textContent = text;
+                      return div.innerHTML;
+                  }
+                  
+                  function filterTable() {
+                      const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+                      const rows = document.querySelectorAll('#fileTableBody tr');
+                      rows.forEach(row => {
+                          const name = row.cells[1]?.textContent.toLowerCase() || '';
+                          row.style.display = name.includes(searchTerm) ? '' : 'none';
+                      });
+                  }
+                  
+                  loadFiles();
+              </script>
+          </body>
+          </html>
+          EOF
+          
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add files.html
+          git diff --quiet && git diff --staged --quiet || git commit -m "📄 بروزرسانی صفحه لیست فایل‌ها [skip ci]"
+          git push
