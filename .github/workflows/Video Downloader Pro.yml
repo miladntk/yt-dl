@@ -44,8 +44,6 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
@@ -98,7 +96,6 @@ jobs:
             *) FORMAT="bestvideo+bestaudio/best" ;;
           esac
           
-          # گزینه‌های yt-dlp بدون پروکسی (در صورت نیاز می‌توانید پروکسی اضافه کنید)
           YT_OPTS="--no-playlist \
             --retries 10 \
             --fragment-retries 10 \
@@ -107,9 +104,6 @@ jobs:
             --max-sleep-interval 5 \
             --limit-rate 10M \
             --no-mtime"
-          
-          # اگر به پروکسی نیاز دارید از این استفاده کنید
-          # YT_OPTS="--proxy socks5://127.0.0.1:1080 $YT_OPTS"
           
           mkdir -p downloads
           SUCCESS=0
@@ -124,7 +118,6 @@ jobs:
             echo "[$INDEX/$TOTAL] $URL"
             echo "==========================================="
             
-            # دریافت اطلاعات ویدیو
             TITLE=$(yt-dlp $YT_OPTS --get-title "$URL" 2>/dev/null | head -1)
             if [ -z "$TITLE" ]; then
               TITLE="video_$INDEX"
@@ -133,10 +126,7 @@ jobs:
             FOLDER="downloads/${INDEX}_${SAFE_NAME}"
             mkdir -p "$FOLDER"
             
-            # دانلود ویدیو با چند روش مختلف
             DOWNLOAD_OK=false
-            
-            # روش اول: با فرمت مشخص شده
             if [ "$QUALITY" = "audio" ]; then
               if yt-dlp $YT_OPTS \
                 -f "$FORMAT" \
@@ -144,7 +134,7 @@ jobs:
                 --audio-format mp3 \
                 --audio-quality 0 \
                 -o "$FOLDER/audio.%(ext)s" \
-                "$URL" 2>&1; then
+                "$URL"; then
                 DOWNLOAD_OK=true
               fi
             else
@@ -154,31 +144,7 @@ jobs:
                 --write-thumbnail \
                 --convert-thumbnails jpg \
                 -o "$FOLDER/video.%(ext)s" \
-                "$URL" 2>&1; then
-                DOWNLOAD_OK=true
-              fi
-            fi
-            
-            # روش دوم: اگر روش اول失败، با کیفیت پایین‌تر
-            if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Retrying with best format..."
-              if yt-dlp $YT_OPTS \
-                -f "best" \
-                -o "$FOLDER/video.%(ext)s" \
-                "$URL" 2>&1; then
-                DOWNLOAD_OK=true
-              fi
-            fi
-            
-            # روش سوم: اگر باز هم失败، فقط صدا
-            if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Retrying with audio only..."
-              if yt-dlp $YT_OPTS \
-                -f "bestaudio" \
-                --extract-audio \
-                --audio-format mp3 \
-                -o "$FOLDER/audio.%(ext)s" \
-                "$URL" 2>&1; then
+                "$URL"; then
                 DOWNLOAD_OK=true
               fi
             fi
@@ -190,9 +156,7 @@ jobs:
               continue
             fi
             
-            # دانلود زیرنویس
             if [ "$SUBTITLES" = "true" ]; then
-              echo "Downloading subtitles..."
               yt-dlp $YT_OPTS \
                 --write-sub \
                 --sub-langs fa,en \
@@ -201,35 +165,26 @@ jobs:
                 -o "$FOLDER/subtitle.%(ext)s" \
                 "$URL" 2>/dev/null || true
               
-              if [ -f "$FOLDER/subtitle.fa.vtt" ] || [ -f "$FOLDER/subtitle.en.vtt" ]; then
-                cd "$FOLDER" || true
+              cd "$FOLDER" || true
+              if ls *.vtt 2>/dev/null 1>/dev/null; then
                 zip -j subtitles.zip *.vtt 2>/dev/null || true
-                cd ../..
-                echo "Subtitles downloaded successfully"
+                rm -f *.vtt
               fi
+              cd ../..
             fi
             
-            # ایجاد فایل اطلاعات
-            cat > "$FOLDER/info.txt" << 'INFOEOF'
-Title: TITLE_PLACEHOLDER
-URL: URL_PLACEHOLDER
-Quality: QUALITY_PLACEHOLDER
-Date: DATE_PLACEHOLDER
-INFOEOF
-            sed -i "s|TITLE_PLACEHOLDER|$TITLE|g" "$FOLDER/info.txt"
-            sed -i "s|URL_PLACEHOLDER|$URL|g" "$FOLDER/info.txt"
-            sed -i "s|QUALITY_PLACEHOLDER|${QUALITY:-best}|g" "$FOLDER/info.txt"
-            sed -i "s|DATE_PLACEHOLDER|$(date '+%Y-%m-%d %H:%M:%S')|g" "$FOLDER/info.txt"
+            echo "Title: $TITLE" > "$FOLDER/info.txt"
+            echo "URL: $URL" >> "$FOLDER/info.txt"
+            echo "Quality: ${QUALITY:-best}" >> "$FOLDER/info.txt"
+            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
             
-            # فشرده‌سازی نهایی
             CREATE_ARCHIVE="${{ github.event.inputs.create_archive }}"
             if [ "$CREATE_ARCHIVE" = "true" ]; then
-              echo "Creating archive..."
               if [ -n "$PASSWORD" ]; then
-                zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER" > /dev/null 2>&1
+                zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
                 rm -rf "$FOLDER"
               else
-                zip -r "${FOLDER}.zip" "$FOLDER" > /dev/null 2>&1
+                zip -r "${FOLDER}.zip" "$FOLDER"
                 rm -rf "$FOLDER"
               fi
             fi
@@ -242,11 +197,6 @@ INFOEOF
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "failed=$FAILED_LIST" >> $GITHUB_OUTPUT
-          
-          echo ""
-          echo "==========================================="
-          echo "Download completed: $SUCCESS of $TOTAL"
-          echo "==========================================="
 
       - name: Push to repository
         if: success() && steps.download.outputs.success > 0
@@ -268,20 +218,14 @@ INFOEOF
               if [ -z "$NAME" ]; then
                 NAME="Video $COUNT"
               fi
-              echo "| $COUNT | $NAME | ✅ |" >> downloads/README.md
+              echo "| $COUNT | $NAME | Done |" >> downloads/README.md
               COUNT=$((COUNT + 1))
             fi
           done
           
           echo "" >> downloads/README.md
           echo "---" >> downloads/README.md
-          echo "**📊 Stats:** ${{ steps.download.outputs.success }} videos downloaded successfully" >> downloads/README.md
-          
-          if [ -n "${{ steps.download.outputs.failed }}" ]; then
-            echo "" >> downloads/README.md
-            echo "**❌ Failed URLs:**" >> downloads/README.md
-            echo '${{ steps.download.outputs.failed }}' >> downloads/README.md
-          fi
+          echo "**Stats:** ${{ steps.download.outputs.success }} videos downloaded successfully" >> downloads/README.md
           
           git add downloads/ 2>/dev/null || true
           if git diff --cached --quiet; then
@@ -297,10 +241,10 @@ INFOEOF
           echo "==========================================="
           echo "Final Download Report"
           echo "==========================================="
-          echo "✅ Success: ${{ steps.download.outputs.success }}"
-          echo "📊 Total: ${{ steps.download.outputs.total }}"
+          echo "Success: ${{ steps.download.outputs.success }}"
+          echo "Total: ${{ steps.download.outputs.total }}"
           FAILED_VALUES="${{ steps.download.outputs.failed }}"
           if [ -n "$FAILED_VALUES" ]; then
-            echo "❌ Failed URLs: $FAILED_VALUES"
+            echo "Failed URLs: $FAILED_VALUES"
           fi
           echo "==========================================="
