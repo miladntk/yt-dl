@@ -1,272 +1,122 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مدیریت ویدیوها - YouTube Downloader</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            padding: 30px;
-            background: #f8f9fa;
-        }
-        .stat-card {
-            text-align: center;
-            padding: 20px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .stat-card h3 {
-            color: #667eea;
-            font-size: 2em;
-        }
-        .controls {
-            padding: 20px 30px;
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        .search-box {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 1em;
-        }
-        .refresh-btn {
-            padding: 10px 20px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-        }
-        .table-container {
-            padding: 30px;
-            overflow-x: auto;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th {
-            background: #667eea;
-            color: white;
-            padding: 15px;
-            text-align: right;
-        }
-        td {
-            padding: 15px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        tr:hover { background: #f8f9fa; }
-        .download-btn {
-            display: inline-block;
-            padding: 8px 15px;
-            background: #4caf50;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-size: 0.9em;
-            margin: 0 5px;
-        }
-        .download-folder-btn {
-            background: #ff9800;
-        }
-        .github-link {
-            background: #24292e;
-        }
-        .loading, .error {
-            text-align: center;
-            padding: 50px;
-            font-size: 1.2em;
-        }
-        .error { color: #f44336; }
-        @media (max-width: 768px) {
-            th, td { font-size: 0.8em; padding: 8px; }
-            .download-btn { padding: 5px 10px; font-size: 0.75em; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📥 لیست ویدیوهای دانلود شده</h1>
-            <p>برای دانلود روی دکمه‌های سبز و نارنجی کلیک کنید</p>
-        </div>
-        
-        <div class="stats" id="stats">
-            <div class="stat-card"><h3 id="totalCount">0</h3><p>تعداد کل</p></div>
-            <div class="stat-card"><h3 id="folderCount">0</h3><p>پوشه‌ها</p></div>
-            <div class="stat-card"><h3 id="fileCount">0</h3><p>فایل‌ها</p></div>
-            <div class="stat-card"><h3 id="totalSize">0</h3><p>حجم کل</p></div>
-        </div>
-        
-        <div class="controls">
-            <input type="text" class="search-box" id="searchBox" placeholder="🔍 جستجوی فایل‌ها..." onkeyup="filterTable()">
-            <button class="refresh-btn" onclick="loadFiles()">🔄 بروزرسانی</button>
-        </div>
-        
-        <div class="table-container">
-            <table id="fileTable">
-                <thead>
-                    <tr><th>نوع</th><th>نام</th><th>حجم</th><th>عملیات</th></tr>
-                </thead>
-                <tbody id="fileTableBody">
-                    <tr><td colspan="4" class="loading">⏳ در حال بارگذاری فایل‌ها...</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+function displayFiles(files) {
+    const tbody = document.getElementById('fileTableBody');
+    let folders = 0;
+    let fileItems = 0;
+    let totalSize = 0;
     
-    <script>
-        // دریافت نام مخزن از آدرس صفحه
-        const repoPath = window.location.pathname.split('/');
-        const owner = repoPath[1] || 'miladntk';
-        const repo = repoPath[2] || 'yt-dl';
-        
-        async function loadFiles() {
-            const tbody = document.getElementById('fileTableBody');
-            tbody.innerHTML = '<tr><td colspan="4" class="loading">⏳ در حال بارگذاری فایل‌ها...</td></tr>';
+    // گروه‌بندی فایل‌های چندتکه
+    const zipParts = {};
+    
+    const rows = files.map(file => {
+        if (file.type === 'dir') {
+            folders++;
+            // بررسی وجود فایل‌های zip در این پوشه
+            return `
+                <tr>
+                    <td>📁 پوشه</td>
+                    <td><strong>${escapeHtml(file.name)}</strong></td>
+                    <td>-</td>
+                    <td>
+                        <a href="${file.html_url}" target="_blank" class="download-btn download-folder-btn">📂 مشاهده در GitHub</a>
+                        <button onclick="downloadFolderAsZip('${file.path}', '${file.name}')" class="download-btn github-link">📥 دانلود کل پوشه (ZIP)</button>
+                     </td>
+                 </tr>
+            `;
+        } else {
+            // بررسی فایل‌های zip چندتکه
+            if (file.name.match(/\.(zip|z[0-9]+)$/)) {
+                const baseName = file.name.replace(/\.(zip|z[0-9]+)$/, '');
+                if (!zipParts[baseName]) zipParts[baseName] = [];
+                zipParts[baseName].push(file);
+                return null; // فعلاً نمایش نده
+            }
             
-            try {
-                // استفاده از API گیت‌هاب با افزودن پارامتر time برای جلوگیری از کش
-                const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/videos?t=${Date.now()}`;
-                const response = await fetch(apiUrl);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const files = await response.json();
-                displayFiles(files);
-                
-            } catch (error) {
-                console.error('Error:', error);
-                tbody.innerHTML = `<tr><td colspan="4" class="error">❌ خطا در بارگذاری فایل‌ها: ${error.message}<br><br>
-                    🔍 راهکار: اگر مخزن شما خصوصی است یا فایل‌ها وجود ندارند، این پیام نمایش داده می‌شود.
-                    <br><br>
-                    <a href="https://github.com/${owner}/${repo}/tree/main/videos" target="_blank" style="color:#667eea">📁 مشاهده مستقیم پوشه videos در GitHub</a>
-                </td></tr>`;
+            fileItems++;
+            totalSize += file.size;
+            const icon = getFileIcon(file.name);
+            return `
+                <tr>
+                    <td>${icon} فایل</td>
+                    <td>${escapeHtml(file.name)}</td>
+                    <td>${formatFileSize(file.size)}</td>
+                    <td>
+                        <a href="${file.download_url}" class="download-btn" download>⬇️ دانلود مستقیم</a>
+                     </td>
+                 </tr>
+            `;
+        }
+    }).filter(row => row !== null);
+    
+    // اضافه کردن فایل‌های چندتکه به عنوان یک آیتم
+    for (const [baseName, parts] of Object.entries(zipParts)) {
+        const totalPartsSize = parts.reduce((sum, p) => sum + p.size, 0);
+        rows.push(`
+            <tr>
+                <td>📦 فایل چندتکه</td>
+                <td><strong>${escapeHtml(baseName)}</strong> (${parts.length} قطعه)</td>
+                <td>${formatFileSize(totalPartsSize)}</td>
+                <td>
+                    <button onclick="downloadMultiPartZip(${JSON.stringify(parts)})" class="download-btn">⬇️ دانلود و合并</button>
+                    <a href="${parts[0].html_url.replace(/\/[^\/]+$/, '')}" target="_blank" class="download-btn github-link">📂 مشاهده قطعات</a>
+                 </td>
+             </tr>
+        `);
+    }
+    
+    tbody.innerHTML = rows;
+    updateStats(files.length, folders, fileItems, totalSize);
+}
+
+// تابع جدید برای دانلود و合并 فایل‌های چندتکه
+async function downloadMultiPartZip(parts) {
+    const zip = new JSZip();
+    
+    for (const part of parts) {
+        const response = await fetch(part.download_url);
+        const blob = await response.blob();
+        const fileName = part.name;
+        zip.file(fileName, blob);
+    }
+    
+    const content = await zip.generateAsync({ type: 'blob' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `${parts[0].name.replace(/\.(zip|z[0-9]+)$/, '')}_merged.zip`;
+    link.click();
+    
+    alert('✅ فایل‌های zip合并 شدند! فایل نهایی را در پوشه دانلودها پیدا کنید.\nسپس با unzip از حالت فشرده خارج کنید.');
+}
+
+// تابع برای دانلود کل پوشه به صورت ZIP
+async function downloadFolderAsZip(folderPath, folderName) {
+    const token = document.getElementById('tokenInput')?.value || '';
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${folderPath}`;
+    
+    try {
+        const response = await fetch(apiUrl, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const items = await response.json();
+        
+        const zip = new JSZip();
+        
+        for (const item of items) {
+            if (item.type === 'file') {
+                const fileRes = await fetch(item.download_url, {
+                    headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+                });
+                const blob = await fileRes.blob();
+                zip.file(item.name, blob);
             }
         }
         
-        function displayFiles(files) {
-            const tbody = document.getElementById('fileTableBody');
-            let folders = 0;
-            let fileItems = 0;
-            let totalSize = 0;
-            
-            if (!files || files.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="loading">📂 پوشه videos خالی است. ابتدا ویدیویی دانلود کنید.</td></tr>';
-                updateStats(0, 0, 0);
-                return;
-            }
-            
-            const rows = files.map(file => {
-                if (file.type === 'dir') {
-                    folders++;
-                    return `
-                        <tr>
-                            <td>📁 پوشه</td>
-                            <td><strong>${escapeHtml(file.name)}</strong></td>
-                            <td>-</td>
-                            <td>
-                                <a href="${file.html_url}" target="_blank" class="download-btn download-folder-btn">📂 مشاهده در GitHub</a>
-                                <a href="https://download-directory.github.io/?url=https://github.com/${owner}/${repo}/tree/main/${file.path}" target="_blank" class="download-btn github-link">📥 دانلود پوشه</a>
-                            </td>
-                        </tr>
-                    `;
-                } else {
-                    fileItems++;
-                    totalSize += file.size;
-                    const sizeText = formatFileSize(file.size);
-                    const icon = getFileIcon(file.name);
-                    return `
-                        <tr>
-                            <td>${icon} فایل</td>
-                            <td>${escapeHtml(file.name)}</td>
-                            <td>${sizeText}</td>
-                            <td>
-                                <a href="${file.download_url}" class="download-btn" download>⬇️ دانلود مستقیم</a>
-                                <a href="${file.html_url}" target="_blank" class="download-btn github-link">🔗 مشاهده در GitHub</a>
-                            </td>
-                        </tr>
-                    `;
-                }
-            }).join('');
-            
-            tbody.innerHTML = rows;
-            updateStats(files.length, folders, fileItems, totalSize);
-        }
+        const content = await zip.generateAsync({ type: 'blob' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `${folderName}.zip`;
+        link.click();
         
-        function updateStats(total, folders, files, size) {
-            document.getElementById('totalCount').textContent = total;
-            document.getElementById('folderCount').textContent = folders;
-            document.getElementById('fileCount').textContent = files;
-            document.getElementById('totalSize').textContent = formatFileSize(size);
-        }
-        
-        function getFileIcon(filename) {
-            if (filename.endsWith('.mp4')) return '🎬';
-            if (filename.endsWith('.mkv')) return '🎥';
-            if (filename.endsWith('.zip')) return '📦';
-            if (filename.endsWith('.rar')) return '🗜️';
-            if (filename.match(/\.z[0-9]+$/)) return '🧩';
-            if (filename.endsWith('.jpg') || filename.endsWith('.png')) return '🖼️';
-            if (filename.endsWith('.srt') || filename.endsWith('.vtt')) return '📝';
-            return '📄';
-        }
-        
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(1024));
-            return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function filterTable() {
-            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-            const rows = document.querySelectorAll('#fileTableBody tr');
-            rows.forEach(row => {
-                const name = row.cells[1]?.textContent.toLowerCase() || '';
-                row.style.display = name.includes(searchTerm) ? '' : 'none';
-            });
-        }
-        
-        // بارگذاری خودکار هنگام باز شدن صفحه
-        loadFiles();
-    </script>
-</body>
-</html>
+    } catch (error) {
+        alert('خطا: ' + error.message + '\nاگر مخزن خصوصی است، توکن معتبر وارد کنید.');
+    }
+}
