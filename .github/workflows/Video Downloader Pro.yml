@@ -64,6 +64,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg zip unzip p7zip-full curl jq
           pip3 install --upgrade yt-dlp
+          # بررسی نصب موفق
+          yt-dlp --version
 
       - name: Process URLs
         id: process
@@ -80,18 +82,25 @@ jobs:
           # نمایش لینک‌ها برای دیباگ
           echo "URLs to download:"
           cat urls.txt
+          
+          if [ $COUNT -eq 0 ]; then
+            echo "ERROR: No valid URLs found!"
+            exit 1
+          fi
 
-      - name: Download videos
+      - name: Download videos (with debug)
         id: download
         env:
           QUALITY: ${{ github.event.inputs.quality }}
           PASSWORD: ${{ github.event.inputs.password }}
           SUBTITLES: ${{ github.event.inputs.download_subtitles }}
         run: |
+          # تابع sanitize
           sanitize() {
             echo "$1" | sed 's/[\/:*?"<>|]/_/g' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
           }
           
+          # تنظیم کیفیت
           case "$QUALITY" in
             audio) FORMAT="bestaudio/best" ;;
             2160) FORMAT="bestvideo[height<=2160]+bestaudio/best[height<=2160]" ;;
@@ -103,16 +112,15 @@ jobs:
           esac
           
           YT_OPTS="--no-playlist \
-            --retries 10 \
-            --fragment-retries 10 \
-            --sleep-requests 1 \
-            --sleep-interval 2 \
-            --max-sleep-interval 5 \
-            --limit-rate 10M \
-            --no-mtime"
+            --retries 3 \
+            --fragment-retries 3 \
+            --no-mtime \
+            --verbose"
           
-          # ایجاد پوشه videos در ریشه مخزن
+          # ایجاد پوشه videos
           mkdir -p videos
+          echo "Created videos directory at: $(pwd)/videos"
+          
           SUCCESS=0
           FAILED_LIST=""
           INDEX=0
@@ -122,18 +130,27 @@ jobs:
             INDEX=$((INDEX + 1))
             echo ""
             echo "==========================================="
-            echo "[$INDEX/$TOTAL] $URL"
+            echo "[$INDEX/$TOTAL] Downloading: $URL"
             echo "==========================================="
             
-            TITLE=$(yt-dlp $YT_OPTS --get-title "$URL" 2>/dev/null | head -1)
-            if [ -z "$TITLE" ]; then
+            # دریافت عنوان ویدیو
+            echo "Getting video title..."
+            TITLE=$(yt-dlp $YT_OPTS --get-title "$URL" 2>&1)
+            if [ -z "$TITLE" ] || echo "$TITLE" | grep -q "ERROR"; then
+              echo "WARNING: Could not get title, using fallback"
               TITLE="video_$INDEX"
             fi
+            echo "Title: $TITLE"
+            
             SAFE_NAME=$(sanitize "$TITLE")
             FOLDER="videos/${INDEX}_${SAFE_NAME}"
+            echo "Target folder: $FOLDER"
             mkdir -p "$FOLDER"
             
+            # دانلود
             DOWNLOAD_OK=false
+            echo "Starting download with format: $FORMAT"
+            
             if [ "$QUALITY" = "audio" ]; then
               if yt-dlp $YT_OPTS \
                 -f "$FORMAT" \
@@ -143,6 +160,9 @@ jobs:
                 -o "$FOLDER/audio.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
+                echo "Audio download successful"
+              else
+                echo "Audio download failed"
               fi
             else
               if yt-dlp $YT_OPTS \
@@ -153,17 +173,26 @@ jobs:
                 -o "$FOLDER/video.%(ext)s" \
                 "$URL"; then
                 DOWNLOAD_OK=true
+                echo "Video download successful"
+              else
+                echo "Video download failed"
               fi
             fi
             
             if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Download failed: $URL"
+              echo "ERROR: Download failed for: $URL"
               FAILED_LIST="$FAILED_LIST $URL"
               rm -rf "$FOLDER"
               continue
             fi
             
+            # بررسی وجود فایل دانلود شده
+            echo "Checking downloaded files in $FOLDER:"
+            ls -la "$FOLDER"
+            
+            # دانلود زیرنویس
             if [ "$SUBTITLES" = "true" ]; then
+              echo "Downloading subtitles..."
               yt-dlp $YT_OPTS \
                 --write-sub \
                 --sub-langs fa,en \
@@ -171,22 +200,20 @@ jobs:
                 --skip-download \
                 -o "$FOLDER/subtitle.%(ext)s" \
                 "$URL" 2>/dev/null || true
-              
-              cd "$FOLDER" || true
-              if ls *.vtt 2>/dev/null 1>/dev/null; then
-                zip -j subtitles.zip *.vtt 2>/dev/null || true
-                rm -f *.vtt
-              fi
-              cd ../..
             fi
             
-            echo "Title: $TITLE" > "$FOLDER/info.txt"
-            echo "URL: $URL" >> "$FOLDER/info.txt"
-            echo "Quality: ${QUALITY:-best}" >> "$FOLDER/info.txt"
-            echo "Date: $(date '+%Y-%m-%d %H:%M:%S')" >> "$FOLDER/info.txt"
+            # ایجاد فایل info
+            cat > "$FOLDER/info.txt" << EOF
+Title: $TITLE
+URL: $URL
+Quality: ${QUALITY:-best}
+Date: $(date '+%Y-%m-%d %H:%M:%S')
+EOF
             
+            # فشرده‌سازی
             CREATE_ARCHIVE="${{ github.event.inputs.create_archive }}"
             if [ "$CREATE_ARCHIVE" = "true" ]; then
+              echo "Creating archive..."
               if [ -n "$PASSWORD" ]; then
                 zip -r -P "$PASSWORD" "${FOLDER}.zip" "$FOLDER"
                 rm -rf "$FOLDER"
@@ -197,112 +224,57 @@ jobs:
             fi
             
             SUCCESS=$((SUCCESS + 1))
-            echo "Downloaded: ${SAFE_NAME}"
+            echo "Successfully downloaded: ${SAFE_NAME}"
             
           done < urls.txt
           
+          # ذخیره نتایج
           echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "failed=$FAILED_LIST" >> $GITHUB_OUTPUT
           
-          # نمایش محتوای پوشه videos برای دیباگ
+          # نمایش نتایج نهایی
           echo ""
           echo "==========================================="
+          echo "Download Summary"
+          echo "==========================================="
+          echo "Successful: $SUCCESS"
+          echo "Failed: $((TOTAL - SUCCESS))"
+          echo ""
           echo "Contents of videos folder:"
-          echo "==========================================="
-          ls -la videos/
+          ls -la videos/ || echo "videos folder is empty or does not exist"
           echo ""
-          echo "Files in videos folder:"
-          find videos -type f -name "*.mp4" -o -name "*.mp3" -o -name "*.zip" 2>/dev/null
+          echo "Finding media files:"
+          find videos -type f \( -name "*.mp4" -o -name "*.mp3" -o -name "*.zip" \) 2>/dev/null || echo "No media files found"
 
-      - name: Create README
+      - name: Commit and push (if files exist)
         if: steps.download.outputs.success > 0
         run: |
-          echo "# Downloaded Videos" > videos/README.md
-          echo "" >> videos/README.md
-          echo "These files were automatically downloaded by GitHub Actions" >> videos/README.md
-          echo "" >> videos/README.md
-          echo "Download Date: $(date '+%Y-%m-%d %H:%M:%S')" >> videos/README.md
-          echo "" >> videos/README.md
-          echo "## Video List" >> videos/README.md
-          echo "" >> videos/README.md
-          echo "| # | Video Name | Type |" >> videos/README.md
-          echo "|---|------------|------|" >> videos/README.md
-          
-          COUNT=1
-          # لیست کردن فایل‌های zip
-          for zipfile in videos/*.zip; do
-            if [ -f "$zipfile" ]; then
-              NAME=$(basename "$zipfile" .zip)
-              NAME=$(basename "$NAME" | cut -d'_' -f2-)
-              echo "| $COUNT | $NAME | ZIP Archive |" >> videos/README.md
-              COUNT=$((COUNT + 1))
-            fi
-          done
-          
-          # لیست کردن پوشه‌ها
-          for folder in videos/*/; do
-            if [ -d "$folder" ] && [ "$folder" != "videos//" ]; then
-              NAME=$(basename "$folder")
-              NAME=$(echo "$NAME" | cut -d'_' -f2-)
-              # بررسی نوع فایل در پوشه
-              if [ -f "${folder}/video.mp4" ]; then
-                TYPE="Video MP4"
-              elif [ -f "${folder}/audio.mp3" ]; then
-                TYPE="Audio MP3"
-              else
-                TYPE="Folder"
-              fi
-              echo "| $COUNT | $NAME | $TYPE |" >> videos/README.md
-              COUNT=$((COUNT + 1))
-            fi
-          done
-          
-          echo "" >> videos/README.md
-          echo "---" >> videos/README.md
-          echo "**Stats:** ${{ steps.download.outputs.success }} videos downloaded successfully" >> videos/README.md
-          
-          echo "README created successfully"
-          cat videos/README.md
-
-      - name: Commit and push videos
-        if: steps.download.outputs.success > 0
-        run: |
-          # بررسی وجود فایل برای commit
+          # بررسی وجود فایل
           if [ ! -d "videos" ] || [ -z "$(ls -A videos 2>/dev/null)" ]; then
-            echo "No files to commit"
+            echo "No files found in videos folder to commit"
             exit 0
           fi
           
-          echo "Files to commit:"
+          echo "Files found in videos folder:"
           ls -la videos/
           
-          # اضافه کردن فایل‌ها به git
           git add videos/
           
-          # بررسی تغییرات
           if git diff --cached --quiet; then
             echo "No changes to commit"
-            exit 0
+          else
+            git commit -m "Add downloaded videos: ${{ steps.download.outputs.success }} items [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
+            git push origin HEAD:${{ github.ref_name }}
+            echo "Successfully pushed to repository"
           fi
-          
-          # commit و push با force
-          git commit -m "Add downloaded videos: ${{ steps.download.outputs.success }} items [skip ci]"
-          
-          # دریافت آخرین تغییرات قبل از push
-          git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
-          
-          # push با force در صورت نیاز
-          git push origin HEAD:${{ github.ref_name }} --force-with-lease || \
-          git push origin HEAD:${{ github.ref_name }} --force
-          
-          echo "Successfully pushed to repository"
 
-      - name: Upload artifacts (backup)
-        if: steps.download.outputs.success > 0
+      - name: Upload artifacts (always try)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: downloaded-videos
+          name: downloaded-videos-$(date +'%Y%m%d-%H%M%S')
           path: videos/
           retention-days: 7
 
@@ -314,12 +286,9 @@ jobs:
           echo "==========================================="
           echo "Success: ${{ steps.download.outputs.success }}"
           echo "Total: ${{ steps.download.outputs.total }}"
-          FAILED_VALUES="${{ steps.download.outputs.failed }}"
-          if [ -n "$FAILED_VALUES" ]; then
-            echo "Failed URLs: $FAILED_VALUES"
-          fi
           echo "==========================================="
           echo ""
-          echo "📍 Files saved in: videos/ folder"
-          echo "📦 Artifacts also available in Actions tab"
+          echo "To access downloaded files:"
+          echo "1. Check 'videos' folder in repository"
+          echo "2. Download artifact from Actions tab"
           echo "==========================================="
