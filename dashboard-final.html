@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader Pro - کنترل پنل نهایی</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .card {
+            background: white;
+            border-radius: 25px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+            overflow: hidden;
+            margin-bottom: 25px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 35px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2.2em; margin-bottom: 10px; }
+        .header p { opacity: 0.9; }
+        .form-section { padding: 35px; }
+        .form-group { margin-bottom: 25px; }
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+        textarea, input {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        textarea { min-height: 120px; resize: vertical; }
+        .quality-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 12px;
+        }
+        .quality-btn {
+            background: #f0f0f0;
+            padding: 12px;
+            text-align: center;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .quality-btn.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .checkbox-group input { width: 22px; height: 22px; }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 1.2em;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            padding: 25px;
+            background: #f8f9fa;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 15px;
+            background: white;
+            border-radius: 15px;
+        }
+        .stat-card h3 { color: #667eea; font-size: 2em; }
+        .videos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .video-card {
+            background: white;
+            border-radius: 15px;
+            padding: 18px;
+            border-right: 4px solid #4caf50;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .video-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+        .links {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .links a {
+            background: #f0f0f0;
+            padding: 8px 16px;
+            border-radius: 10px;
+            text-decoration: none;
+            color: #667eea;
+        }
+        @media (max-width: 768px) {
+            .form-section { padding: 20px; }
+            .quality-options { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="header">
+            <h1>🎬 YouTube Downloader Pro</h1>
+            <p>دانلود خودکار ویدیو از یوتیوب با GitHub Actions</p>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-card"><h3 id="totalVideos">0</h3><p>ویدیوهای ذخیره شده</p></div>
+            <div class="stat-card"><h3 id="totalSize">0</h3><p>حجم کل</p></div>
+            <div class="stat-card"><h3 id="lastUpdate">-</h3><p>آخرین بروزرسانی</p></div>
+        </div>
+
+        <div class="form-section">
+            <div class="form-group">
+                <label>🔗 لینک ویدیو (لینک‌ها را با کاما یا خط جدید جدا کنید)</label>
+                <textarea id="videoUrls" placeholder="https://youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>🎬 کیفیت ویدیو</label>
+                <div class="quality-options" id="qualityOptions">
+                    <div class="quality-btn" data-quality="best">بهترین</div>
+                    <div class="quality-btn" data-quality="2160">4K</div>
+                    <div class="quality-btn" data-quality="1080">Full HD</div>
+                    <div class="quality-btn selected" data-quality="720">HD</div>
+                    <div class="quality-btn" data-quality="480">SD</div>
+                    <div class="quality-btn" data-quality="audio">فقط صدا</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="downloadSubtitles">
+                    <label>📝 دانلود زیرنویس</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>🔒 رمز فایل (اختیاری)</label>
+                <input type="text" id="password" placeholder="رمز دلخواه">
+            </div>
+            <button onclick="runWorkflow()">🚀 شروع دانلود</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="header" style="padding: 20px;"><h2>📥 ویدیوهای ذخیره شده</h2></div>
+        <div class="form-section">
+            <div id="videosContainer">⏳ در حال بارگذاری...</div>
+            <div class="links">
+                <a href="download.html" target="_blank">📂 مدیریت ویدیوها</a>
+                <a href="https://github.com/miladntk/yt-dl/actions" target="_blank">⚙️ مشاهده اکشن‌ها</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        });
+    });
+
+    function getSelectedQuality() {
+        return document.querySelector('.quality-btn.selected')?.dataset.quality || '720';
+    }
+
+    function runWorkflow() {
+        const urls = document.getElementById('videoUrls').value.split(/[,\n]/).filter(u => u.trim() && u.includes('youtu'));
+        if (urls.length === 0) {
+            alert('❌ لطفاً حداقل یک لینک وارد کنید');
+            return;
+        }
+        localStorage.setItem('yt_urls', urls.join(','));
+        localStorage.setItem('yt_quality', getSelectedQuality());
+        localStorage.setItem('yt_subtitles', document.getElementById('downloadSubtitles').checked);
+        localStorage.setItem('yt_password', document.getElementById('password').value);
+        window.open('https://github.com/miladntk/yt-dl/actions/workflows/youtube-downloader.yml', '_blank');
+        alert('✅ صفحه اکشن باز شد.\n1. روی "Run workflow" کلیک کنید\n2. مقادیر را بررسی کنید\n3. دوباره "Run workflow" بزنید');
+    }
+
+    async function loadVideos() {
+        try {
+            const res = await fetch('https://raw.githubusercontent.com/miladntk/yt-dl/main/files.json');
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            const videos = data.videos || [];
+            document.getElementById('totalVideos').innerText = videos.length;
+            document.getElementById('lastUpdate').innerText = data.lastUpdate ? new Date(data.lastUpdate).toLocaleString('fa-IR') : '-';
+            let total = 0;
+            videos.forEach(v => v.files?.forEach(f => total += f.size));
+            document.getElementById('totalSize').innerText = formatBytes(total);
+            const container = document.getElementById('videosContainer');
+            if (!videos.length) {
+                container.innerHTML = '<div style="text-align:center;padding:40px">📂 هنوز ویدیویی دانلود نشده</div>';
+                return;
+            }
+            container.innerHTML = `<div class="videos-grid">${videos.map(v => `
+                <div class="video-card">
+                    <div class="video-name">📁 ${escape(v.name)}</div>
+                    <div>📄 ${v.files?.length || 0} فایل</div>
+                    <div>💾 ${formatBytes(v.files?.reduce((s,f)=>s+(f.size||0),0)||0)}</div>
+                    <a href="https://github.com/miladntk/yt-dl/tree/main/${v.path}" target="_blank" style="color:#667eea;text-decoration:none;display:inline-block;margin-top:10px">🔗 مشاهده پوشه →</a>
+                </div>`).join('')}</div>`;
+        } catch(e) {
+            document.getElementById('videosContainer').innerHTML = '<div style="text-align:center;padding:40px">⚠️ خطا در بارگذاری</div>';
+        }
+    }
+    function formatBytes(b) { if(b==0)return '0 B'; const k=1024,i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(1)+' '+['B','KB','MB','GB'][i]; }
+    function escape(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+    loadVideos();
+    setInterval(loadVideos, 30000);
+    const saved = localStorage.getItem('yt_urls');
+    if(saved) document.getElementById('videoUrls').value = saved;
+</script>
+</body>
+</html>
