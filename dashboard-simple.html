@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>کنترل پنل YouTube Downloader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2em; margin-bottom: 10px; }
+        .header p { opacity: 0.9; }
+        
+        .form-section {
+            padding: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #333;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1em;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        .quality-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+        }
+        .quality-btn {
+            background: #f0f0f0;
+            padding: 10px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .quality-btn.selected {
+            background: #667eea;
+            color: white;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checkbox-group input {
+            width: auto;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status-section {
+            padding: 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+        .run-status {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+        .warning { background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        
+        .links {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        .links a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .videos-list {
+            margin-top: 20px;
+        }
+        .video-item {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-right: 4px solid #4caf50;
+        }
+        
+        @media (max-width: 768px) {
+            .form-section, .status-section { padding: 20px; }
+            .quality-options { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>🎬 YouTube Downloader Pro</h1>
+                <p>دانلود خودکار ویدیو از یوتیوب با GitHub Actions</p>
+            </div>
+            
+            <div class="form-section">
+                <div class="warning">
+                    ⚠️ <strong>نکته مهم:</strong> برای اجرای دانلود، روی دکمه "شروع دانلود" کلیک کنید.
+                    ویدیوها پس از دانلود در صفحه <strong>download.html</strong> قابل مشاهده هستند.
+                </div>
+                
+                <div class="form-group">
+                    <label>🔗 لینک ویدیو (لینک‌ها را با کاما یا فاصله جدا کنید)</label>
+                    <textarea id="videoUrls" placeholder="https://youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>🎬 کیفیت ویدیو</label>
+                    <div class="quality-options" id="qualityOptions">
+                        <div class="quality-btn" data-quality="best">بهترین کیفیت</div>
+                        <div class="quality-btn" data-quality="2160">4K</div>
+                        <div class="quality-btn" data-quality="1080">Full HD</div>
+                        <div class="quality-btn selected" data-quality="720">HD (720p)</div>
+                        <div class="quality-btn" data-quality="480">SD (480p)</div>
+                        <div class="quality-btn" data-quality="audio">فقط صدا</div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="downloadSubtitles">
+                        <label for="downloadSubtitles" style="margin:0;">📝 دانلود زیرنویس</label>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>🔒 رمز فایل (اختیاری)</label>
+                    <input type="text" id="password" placeholder="اختیاری">
+                </div>
+                
+                <button id="runBtn" onclick="openGitHubAction()">🚀 شروع دانلود</button>
+            </div>
+            
+            <div class="status-section">
+                <h3>📊 ویدیوهای موجود</h3>
+                <div id="videosList" class="videos-list">
+                    <p>در حال بارگذاری...</p>
+                </div>
+                <div class="links">
+                    <a href="download.html" target="_blank">📂 صفحه مدیریت ویدیوها</a>
+                    <a href="https://github.com/miladntk/yt-dl/actions" target="_blank">🔗 مشاهده اکشن‌ها در GitHub</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // انتخاب کیفیت
+        document.querySelectorAll('.quality-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+            });
+        });
+        
+        function getSelectedQuality() {
+            const selected = document.querySelector('.quality-btn.selected');
+            return selected ? selected.dataset.quality : '720';
+        }
+        
+        function getVideoUrls() {
+            const urls = document.getElementById('videoUrls').value;
+            return urls.split(/[,\n\s]+/).filter(u => u.trim() && u.includes('youtu'));
+        }
+        
+        // باز کردن صفحه اکشن در GitHub با مقادیر پر شده
+        function openGitHubAction() {
+            const urls = getVideoUrls();
+            const quality = getSelectedQuality();
+            const subtitles = document.getElementById('downloadSubtitles').checked;
+            const password = document.getElementById('password').value;
+            
+            if (urls.length === 0) {
+                alert('❌ لطفاً حداقل یک لینک یوتیوب وارد کنید');
+                return;
+            }
+            
+            // ساخت URL برای اجرای دستی اکشن
+            const actionUrl = `https://github.com/miladntk/yt-dl/actions/workflows/youtube-downloader.yml`;
+            
+            // ذخیره مقادیر در localStorage برای استفاده در صفحه اکشن
+            localStorage.setItem('yt_urls', urls.join(','));
+            localStorage.setItem('yt_quality', quality);
+            localStorage.setItem('yt_subtitles', subtitles);
+            localStorage.setItem('yt_password', password);
+            
+            // باز کردن صفحه اکشن
+            window.open(actionUrl, '_blank');
+            
+            alert(`✅ صفحه اکشن باز شد!\n\nلطفاً در صفحه باز شده:\n1. روی "Run workflow" کلیک کنید\n2. مقادیر را بررسی کنید\n3. دوباره "Run workflow" را بزنید`);
+        }
+        
+        // بارگذاری لیست ویدیوها از files.json
+        async function loadVideosList() {
+            const container = document.getElementById('videosList');
+            
+            try {
+                const response = await fetch('files.json');
+                if (!response.ok) throw new Error('files.json پیدا نشد');
+                
+                const data = await response.json();
+                
+                if (data.videos && data.videos.length > 0) {
+                    let html = '';
+                    for (const video of data.videos) {
+                        const fileCount = video.files ? video.files.length : 0;
+                        const hasThumbnail = video.thumbnail ? '✅' : '❌';
+                        html += `
+                            <div class="video-item">
+                                <strong>📁 ${video.name}</strong><br>
+                                <small>📄 ${fileCount} فایل | 🖼️ تصویر: ${hasThumbnail}</small><br>
+                                <small>📅 آخرین بروزرسانی: ${new Date(data.lastUpdate).toLocaleString('fa-IR')}</small>
+                            </div>
+                        `;
+                    }
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<p>📂 هنوز ویدیویی دانلود نشده است.</p>';
+                }
+                
+                if (data.lastUpdate) {
+                    const updateSpan = document.createElement('small');
+                    updateSpan.style.display = 'block';
+                    updateSpan.style.marginTop = '10px';
+                    updateSpan.style.color = '#666';
+                    updateSpan.innerHTML = `🕐 آخرین بروزرسانی لیست: ${new Date(data.lastUpdate).toLocaleString('fa-IR')}`;
+                    container.appendChild(updateSpan);
+                }
+                
+            } catch (error) {
+                console.error('Error loading videos:', error);
+                container.innerHTML = '<p>❌ خطا در بارگذاری لیست ویدیوها. لطفاً صفحه را refresh کنید.</p>';
+            }
+        }
+        
+        // بارگذاری اولیه
+        loadVideosList();
+        
+        // بروزرسانی هر 30 ثانیه
+        setInterval(loadVideosList, 30000);
+    </script>
+</body>
+</html>
