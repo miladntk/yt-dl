@@ -1,6 +1,12 @@
-🎬 YouTube Video Downloader Pro          ----> https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/dashboard.html
+🎬 YouTube Video Downloader Pro       
+
+-----------------------> https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/dashboard.html
+
 -----------------------> https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/dashboard-simple.html
+
 -----------------------> https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/dashboard-final.html
+
+----------------------->https://htmlpreview.github.io/?https://github.com/miladntk/yt-dl/blob/main/downloade.html
 
 ابزار خودکار دانلود ویدیو از YouTube با قابلیت آپلود مستقیم در مخزن GitHub
 
