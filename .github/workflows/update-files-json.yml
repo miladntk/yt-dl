@@ -14,17 +14,85 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       
       - name: Generate files.json
         run: |
-          echo '{ "files": [], "lastUpdate": "'$(date -Iseconds)'" }' > files.json
+          echo '{"lastUpdate":"'$(date -Iseconds)'","videos":[]}' > files.json
           
-          # اینجا می‌توانید اسکریپت تولید JSON کامل را بنویسید
+          # اسکریپت برای ساخت JSON کامل
+          cat > generate_json.py << 'EOF'
+          import json
+          import os
+          import glob
+          from pathlib import Path
+          
+          videos_data = []
+          
+          # پیمایش پوشه videos
+          if os.path.exists('videos'):
+              for folder in os.listdir('videos'):
+                  folder_path = os.path.join('videos', folder)
+                  if os.path.isdir(folder_path):
+                      files_list = []
+                      thumbnail = None
+                      
+                      for file in os.listdir(folder_path):
+                          file_path = os.path.join(folder_path, file)
+                          if os.path.isfile(file_path):
+                              file_info = {
+                                  'name': file,
+                                  'size': os.path.getsize(file_path),
+                                  'path': file_path
+                              }
+                              if file == 'thumbnail.jpg':
+                                  thumbnail = file_info
+                              else:
+                                  files_list.append(file_info)
+                      
+                      videos_data.append({
+                          'name': folder,
+                          'path': folder_path,
+                          'thumbnail': thumbnail,
+                          'files': files_list,
+                          'lastModified': os.path.getmtime(folder_path)
+                      })
+          
+          # مرتب‌سازی بر اساس تاریخ (جدیدترین اول)
+          videos_data.sort(key=lambda x: x['lastModified'], reverse=True)
+          
+          # حذف lastModified از خروجی نهایی
+          for v in videos_data:
+              del v['lastModified']
+          
+          output = {
+              'lastUpdate': '$(date -Iseconds)',
+              'videos': videos_data
+          }
+          
+          # در تاریخ واقعی قرار می‌دهیم
+          import datetime
+          output['lastUpdate'] = datetime.datetime.now().isoformat()
+          
+          with open('files.json', 'w', encoding='utf-8') as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+          
+          print(f"✅ files.json created with {len(videos_data)} videos")
+          EOF
+          
+          python3 generate_json.py
           
       - name: Commit and push
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add files.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update files.json [skip ci]"
-          git push
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "📊 Update files.json [skip ci]"
+            git push
+            echo "✅ files.json updated and pushed"
+          fi
