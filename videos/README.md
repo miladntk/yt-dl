@@ -1,6 +1,7 @@
 # 📥 ویدیوهای دانلود شده
 
-| شماره | نام ویدیو | حجم | وضعیت |
-|-------|-----------|------|--------|
-| 1 | [1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥](./1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥/) | 20MB | 📦 چندتکه (70MB) |
-| 2 | [1_💥-｜-رضا-فرشته-｜-ایرانیان-پس-از-جنگ-1-｜-💥](./1_💥-｜-رضا-فرشته-｜-ایرانیان-پس-از-جنگ-1-｜-💥/) | 75MB | ✅ |
+| شماره | نام ویدیو |
+|-------|-----------|
+| 1 | [1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥](./1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥/) |
+| 2 | [1_💥-｜-رضا-فرشته-｜-ایرانیان-پس-از-جنگ-1-｜-💥](./1_💥-｜-رضا-فرشته-｜-ایرانیان-پس-از-جنگ-1-｜-💥/) |
+| 3 | [1_💥-｜-رضا-فرشته-｜-یاسمین-پهلوی-به-دنبال-حذف-من-بود-!-｜-💥](./1_💥-｜-رضا-فرشته-｜-یاسمین-پهلوی-به-دنبال-حذف-من-بود-!-｜-💥/) |
