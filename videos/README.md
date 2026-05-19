@@ -2,4 +2,4 @@
 
 | شماره | نام ویدیو | حجم | وضعیت |
 |-------|-----------|------|--------|
-| 1 | [1_GOODBYE-T.A.V-(METAL-VERSION)-｜-NEW-IRAN-LEGO-VIDEO](./1_GOODBYE-T.A.V-(METAL-VERSION)-｜-NEW-IRAN-LEGO-VIDEO/) | 25MB | 📦 چندتکه (70MB) |
+| 1 | [1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥](./1_There-Is-No-Peace-Before-｜-Because-You-Killed-Our-Leader-｜-Persian-Pride-Song🔥/) | 20MB | 📦 چندتکه (70MB) |
