@@ -1,21 +1,4 @@
 {
-  "lastUpdate": "2026-05-19T11:55:33.684235",
-  "videos": [
-    {
-      "name": "1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026",
-      "path": "videos/1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026",
-      "thumbnail": {
-        "name": "thumbnail.jpg",
-        "size": 34369,
-        "path": "videos/1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026/thumbnail.jpg"
-      },
-      "files": [
-        {
-          "name": "1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026.mp4",
-          "size": 24449519,
-          "path": "videos/1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026/1_Papa-Iran-｜-Lions-of-Persian-Empire-｜-Cinematic-Music-2026.mp4"
-        }
-      ]
-    }
-  ]
+  "lastUpdate": "2026-05-19T11:57:39.831801",
+  "videos": []
 }
